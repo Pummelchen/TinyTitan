@@ -1,4 +1,4 @@
-// Provenance: copied from sources/TinyTitan/CPUEngine/CPUSampler.swift (TT-122)
+// Provenance: copied from the former shared CPUSampler (TT-122)
 // under the variant-isolation rule; the draw is unchanged, so the shared
 // session samples Inkling exactly as the Inkling route did.
 import TinyTitanCore

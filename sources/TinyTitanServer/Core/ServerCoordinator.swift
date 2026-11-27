@@ -21,9 +21,9 @@ public actor ServerCoordinator {
     var activeCount = 0
     var waiters: [SuspensionSlot] = []
     var shuttingDown = false
-    /// Raised for the duration of every client generation. The side-engine
-    /// reads it to choose its width: one thread while a person is waiting,
-    /// four in the gaps.
+    /// Raised for the duration of every client generation. Memory's background
+    /// retrieval pass reads it to run only in the gaps, never while a person is
+    /// waiting.
     package nonisolated let generating = GenerationSignal()
 
     public init(queueLimit: Int, width: Int = 1) {

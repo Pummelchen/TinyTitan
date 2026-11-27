@@ -1,7 +1,6 @@
 import Foundation
 import TinyTitanLib
 import TinyTitanCore
-import TinyTitanCPUEngine
 
 // The router's failure modes and their wire descriptions.
 //
@@ -112,30 +111,6 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
         }
         for entry in catalog.entries {
             try register(entry, into: &served)
-            // Every engine the install can be served by, named by a suffix, so
-            // one request can ask for the CPU copy of a dense model and the
-            // next for the GPU one: `qwen3.5-2b_4-Bit@cpu`. The aliases share
-            // the install and are listed beside it.
-            for engine in entry.engines {
-                let aliasID = "\(entry.id)@\(engine.rawValue)"
-                guard aliasID != entry.id,
-                    let alias = entry.served(by: engine, id: aliasID)
-                else { continue }
-                // A single-engine install gets the alias so the explicit
-                // spelling resolves, but it is not *listed*: it names the same
-                // engine as the bare id, and two entries for one model in
-                // `/v1/models` is noise. A second engine is a real choice and
-                // is listed.
-                if entry.engines.count > 1, engine != entry.backend {
-                    try register(alias, into: &served)
-                } else {
-                    let choice = try ReasoningFallback.choice(
-                        for: alias.kind,
-                        requested: reasoning)
-                    choices[alias.id] = choice
-                    entries[alias.id] = alias
-                }
-            }
         }
         guard let initial = served.first(where: { $0.id == initialModelID }) else {
             throw ModelRouterError.notInCatalog(initialModelID)
@@ -163,20 +138,12 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
         return servedModels.first { $0.id == base }
     }
 
-    /// Mirrors `CPUModelBackend`'s own clamp, so validation bounds max_tokens
-    /// by the context the CPU engine will actually give the request.
+    /// The window a request against this entry is validated at. A GPU install
+    /// serves the server's configured window; `contextLimit` is the install's
+    /// own lower bound where it declares one.
     static func context(for entry: ModelCatalog.Entry, configured: Int) -> Int {
-        switch entry.backend {
-        case .gpu: configured
-        case .cpu:
-            min(
-                configured, entry.contextLimit ?? CPUModelBackend.contextCeiling,
-                CPUModelBackend.contextCeiling)
-        }
+        min(configured, entry.contextLimit ?? configured)
     }
-
-    /// A CPU family's template has the binary switch Qwen 3.6 has, so it is
-    /// validated as that family, as the single-model CPU path already does.
     static func profile(
         for entry: ModelCatalog.Entry,
         choice: ReasoningChoice
@@ -369,7 +336,7 @@ public actor ModelRouter: ServerInferenceBackend, ResidencyManaging, PromptToken
             choice.effective == choice.requested
             ? "" : " (server level \(choice.requested.rawValue))"
         ServerLog.residency(
-            "loaded \(entry.id) on the \(entry.backend.rawValue)"
+            "loaded \(entry.id) on the gpu engine"
                 + ServerLog.promptCacheField(for: loaded)
                 + " reasoning=\(choice.effective.rawValue)\(fitted)")
         return loaded

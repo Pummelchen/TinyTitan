@@ -1,12 +1,5 @@
 import Foundation
 
-/// An engine that can serve one install. Kept model-free: a plugin says which
-/// engines it provides, and the host maps them to its own backend type.
-public enum ModelEngine: String, Sendable, Equatable, CaseIterable {
-    case gpu
-    case cpu
-}
-
 /// How the host names an install before it loads a model.
 ///
 /// `EngineModelMetadata` is the session's identity: it is read by the loader and
@@ -34,11 +27,6 @@ public struct ModelIdentity: Sendable, Equatable {
     public let sampling: SamplingProfile
     /// The thinking and effort levels its template implements.
     public let reasoningControl: ReasoningControl
-    /// Every engine that can serve the install, most-preferred first. Almost
-    /// everything is GPU-only; a dense install is the one shape both the GPU
-    /// and CPU engines run, and that is a capability of the install, not a
-    /// family name the host has to know.
-    public let engines: [ModelEngine]
     /// The context the checkpoint or backend caps a request at, where it is
     /// less than the server's configured window. nil leaves the window to the
     /// server.
@@ -60,7 +48,6 @@ public struct ModelIdentity: Sendable, Equatable {
         weightBits: Int,
         sampling: SamplingProfile,
         reasoningControl: ReasoningControl,
-        engines: [ModelEngine] = [.gpu],
         contextLimit: Int? = nil,
         unsupportedReason: String? = nil,
         cliUnsupportedReason: String? = nil
@@ -72,7 +59,6 @@ public struct ModelIdentity: Sendable, Equatable {
         self.weightBits = weightBits
         self.sampling = sampling
         self.reasoningControl = reasoningControl
-        self.engines = engines
         self.contextLimit = contextLimit
         self.unsupportedReason = unsupportedReason
         self.cliUnsupportedReason = cliUnsupportedReason

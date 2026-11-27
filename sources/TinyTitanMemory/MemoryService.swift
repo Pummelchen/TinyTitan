@@ -17,10 +17,10 @@ public actor MemoryService {
     /// operation; this is how the tests drive the service.
     let injectedStore: (any MemoryStore)?
     let injectedJournal: (any SessionJournal)?
-    /// The resident side-engine, when one is wired. Nil in every test and in a
-    /// deployment that has not asked for one, which is what keeps the
-    /// callers' no-decision fallback the ordinary path rather than a special
-    /// case.
+    /// The resident side-engine, when one is wired. Nil in every test and in
+    /// the shipped server, which wires none since the dense CPU side engine
+    /// left (TT-142 slice (b)); that is what keeps the callers' no-decision
+    /// fallback the ordinary path rather than a special case.
     let sideEngine: (any MemorySideEngine)?
     /// The background T7 pass and the ranking hints it leaves. Nil exactly
     /// when no side-engine is wired, so the deterministic search path is the

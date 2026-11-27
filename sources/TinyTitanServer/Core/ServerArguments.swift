@@ -52,18 +52,6 @@ public struct ServerArguments: Equatable, Sendable {
     /// the template default. Family support is validated at startup against
     /// the installed manifest.
     public let reasoningEffort: ModelReasoningEffort?
-    /// Serve on the CPU instead of the GPU, from an affine snapshot rather
-    /// than an install.
-    ///
-    /// For models small enough that a GPU is not the point: a 2B reads about
-    /// 1.9 GB per token, which the CPU does at twenty tokens a second on
-    /// four performance cores. It leaves the GPU entirely free, which is why
-    /// the same engine can run a side model beside a 35B.
-    public let cpu: Bool
-    /// Keep the whole snapshot faulted into memory rather than leaving
-    /// residency to the page cache. On by default with `--cpu`, because a
-    /// model that gets evicted between requests pays to fault itself back in.
-    public let cpuResident: Bool
     public let expertCacheSlots: Int?
     /// Bytes the routed-expert cache may use. Slots are derived from it and the
     /// model's own expert stride, so this is the knob and the slot count is the
@@ -121,8 +109,6 @@ public struct ServerArguments: Equatable, Sendable {
         var thinkingMode = ModelThinkingMode.resolved(environment: environment)
         var reasoningEffort = ModelReasoningEffort.resolved(environment: environment)
         var expertCacheSlots: Int?
-        var cpu = false
-        var cpuResident = true
         var expertCacheBudgetBytes: Int?
         var lazyLoad = false
         var idleUnloadSeconds = 0
@@ -147,16 +133,6 @@ public struct ServerArguments: Equatable, Sendable {
             // as this flag's value and then reject it as unknown.
             if flag == "--lazy-load" {
                 lazyLoad = true
-                index += 1
-                continue
-            }
-            if flag == "--cpu" {
-                cpu = true
-                index += 1
-                continue
-            }
-            if flag == "--no-cpu-resident" {
-                cpuResident = false
                 index += 1
                 continue
             }
@@ -357,15 +333,6 @@ public struct ServerArguments: Equatable, Sendable {
         guard let model = model ?? (catalogOnly ? "" : nil) else {
             throw ServerArgumentError.invalid("--model is required")
         }
-        // The CPU engine keeps its snapshot resident and has no
-        // `ResidencyManaging` implementation, so these flags would be accepted,
-        // printed back in the ready banner as active, and do nothing (AUD-0068).
-        // Refuse rather than report a residency the engine does not have.
-        if cpu, lazyLoad || idleUnloadSeconds > 0 {
-            throw ServerArgumentError.invalid(
-                "--lazy-load and --idle-unload-seconds are for the GPU engine; "
-                    + "--cpu keeps its snapshot resident")
-        }
         if reasoningLevel != nil, thinkingWasSet || effortWasSet {
             throw ServerArgumentError.invalid(
                 "--reasoning replaces --thinking and --reasoning-effort; pass one or the other")
@@ -376,7 +343,6 @@ public struct ServerArguments: Equatable, Sendable {
             let conflicts: [(present: Bool, why: String)] = [
                 (modelIDOverride != nil, "--model-id: every catalog model keeps its own id"),
                 (mtpModel != nil, "--mtp-model: a draft head belongs to one model"),
-                (cpu, "--cpu: the catalog knows which engine each model uses"),
                 (
                     idleUnloadSeconds > 0,
                     "--idle-unload-seconds: POST /v1/models/unload releases the resident model"
@@ -473,8 +439,6 @@ public struct ServerArguments: Equatable, Sendable {
             ropeScalingMode: ropeScalingMode,
             thinkingMode: thinkingMode,
             reasoningEffort: reasoningEffort,
-            cpu: cpu,
-            cpuResident: cpuResident,
             expertCacheSlots: expertCacheSlots,
             expertCacheBudgetBytes: expertCacheBudgetBytes,
             lazyLoad: lazyLoad,

@@ -69,17 +69,6 @@ enum DoctorModelScanner {
                         DoctorReport.Skipped(
                             name: child.lastPathComponent, reason: failure.reason))
                 }
-            } else if fileManager.fileExists(
-                atPath: path.appendingPathComponent("config.json").path)
-            {
-                switch probeSnapshot(path) {
-                case .success(let model):
-                    models.append(model)
-                case .failure(let failure):
-                    skipped.append(
-                        DoctorReport.Skipped(
-                            name: child.lastPathComponent, reason: failure.reason))
-                }
             }
         }
         models.sort { $0.id < $1.id }
@@ -164,48 +153,6 @@ enum DoctorModelScanner {
                     policy: estimate.pageCachePolicy,
                     reason: estimate.pageCacheReason),
                 note: nil))
-    }
-
-    private static func probeSnapshot(
-        _ directory: URL
-    ) -> Result<DoctorReport.Model, ProbeFailure> {
-        let data: Data
-        do {
-            data = try BoundedMetadataRead.read(
-                fileAt: directory.appendingPathComponent("config.json"),
-                maxBytes: SSDAIManifestReader.defaultMaxBytes)
-        } catch {
-            return .failure(
-                ProbeFailure(reason: "unreadable config.json: \(error)"))
-        }
-        guard
-            let object = try? JSONSerialization.jsonObject(with: data)
-                as? [String: Any]
-        else {
-            return .failure(
-                ProbeFailure(reason: "config.json is not a JSON object"))
-        }
-        let declared =
-            (object["model_id"] as? String)
-            ?? (object["display_name"] as? String)
-        let id =
-            declared.flatMap { $0.isEmpty ? nil : $0 }
-            ?? directory.lastPathComponent
-        let family = (object["model_type"] as? String) ?? "cpu-snapshot"
-        let bits =
-            (object["quantization"] as? [String: Any])?["bits"] as? Int ?? 0
-        return .success(
-            DoctorReport.Model(
-                id: id,
-                directory: directory.lastPathComponent,
-                family: family,
-                weightBits: bits,
-                sizeBytes: totalFileSize(directory),
-                fit: nil,
-                expertSlots: nil,
-                prefillChunkTokens: nil,
-                pageCache: nil,
-                note: "CPU snapshot: fit is not estimated"))
     }
 
     private static func clampedSum(_ values: UInt64...) -> UInt64 {

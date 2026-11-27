@@ -16,9 +16,9 @@ extension ServerArguments {
 
           --model <dir>          Required model directory. With --models-dir, the
                                  model loaded first: a catalog id or a directory.
-          --models-dir <dir>     Serve every model under dir -- GPU installs and
-                                 CPU snapshots alike -- keeping one resident. A
-                                 request naming another catalog model waits for
+          --models-dir <dir>     Serve every model under dir -- completed installs --
+                                 keeping one resident. A request naming another
+                                 catalog model waits for
                                  in-flight generations, unloads the resident model
                                  and loads the named one. /v1/models lists them.
           --catalog              With --models-dir: print the catalog as JSON and
@@ -119,16 +119,6 @@ extension ServerArguments {
                                  next request reloads transparently. Implies
                                  --lazy-load. Pair with --prompt-cache-disk, since
                                  unloading discards the in-memory prefix cache.
-          --cpu                  Serve on the CPU from an affine snapshot instead
-                                 of the GPU from an install. --model then points at
-                                 a snapshot directory. For models small enough that
-                                 a GPU is not the point: a 2B runs at about twenty
-                                 tokens a second on the performance cores and
-                                 leaves the GPU entirely free.
-          --no-cpu-resident      With --cpu, leave residency to the page cache
-                                 instead of faulting the snapshot in at startup.
-                                 Only worth it on a machine too small to hold the
-                                 model, where the alternative is swapping.
           --help                 Show this help.
         """
 

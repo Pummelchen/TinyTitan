@@ -26,10 +26,12 @@ public enum MemorySupersession: Sendable, Equatable {
 
 /// The judgements a resident side-engine is asked, in memory's own terms.
 ///
-/// The engine itself lives in the runtime target, which this one cannot import
-/// — `TinyTitanMemory` depends on `ContinuityCore` and nothing else — so the
-/// server adapts `SideEngine` to this port. Two rules make an optional,
-/// fallible engine safe to consult:
+/// The engine itself lives in a runtime target, which this one cannot import —
+/// `TinyTitanMemory` depends on `ContinuityCore` and nothing else — so a host
+/// adapts its own judge to this port. The shipped server binds none: its only
+/// implementation was the dense CPU side engine, and that left with TT-142
+/// slice (b) (2026-11-28). Two rules make an optional, fallible engine safe to
+/// consult:
 ///
 /// - **`nil` is "no decision"**, and the caller then behaves exactly as it did
 ///   before the engine existed. A shut-down engine, a completion the parser

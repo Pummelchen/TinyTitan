@@ -142,19 +142,14 @@ package actor ServerModelSession: ServerInferenceBackend, PromptTokenCounting, P
     /// The prompt cache a catalog server's *initial* model will really run,
     /// which is what the routing banner states beside `engine=`.
     ///
-    /// The extra input over `effectivePromptCacheMode` is the engine: a CPU
-    /// entry has no cache at all, so it reports `.off` rather than a mode the
-    /// server asked for that could never exist. The catalog loader never
-    /// attaches MTP, so the engine and the width are the whole rule. Kept here
-    /// rather than in the executable so both arms are testable without a
+    /// The catalog loader never attaches MTP, so the width is the whole rule.
+    /// Kept here rather than in the executable so it is testable without a
     /// catalog on disk.
     package static func initialPromptCacheMode(
-        backend: ModelBackend,
         requested: ServerPromptCacheMode,
         maxConcurrentSequences: Int
     ) -> ServerPromptCacheMode {
-        guard backend != .cpu else { return .off }
-        return effectivePromptCacheMode(
+        effectivePromptCacheMode(
             requested: requested, mtpEnabled: false,
             slots: maxConcurrentSequences)
     }

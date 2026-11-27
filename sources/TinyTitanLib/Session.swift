@@ -17,9 +17,9 @@
 import Foundation
 import TinyTitanCore
 
-/// The strong half of the session→engine link. `Engine`/`CPUEngine` own the
-/// box; `Session` holds it weakly, so `unload()` really releases the engine and
-/// the session then reports `engineShutDown`.
+/// The strong half of the session→engine link. `Engine` owns the box; `Session`
+/// holds it weakly, so `unload()` really releases the engine and the session
+/// then reports `engineShutDown`.
 package final class BackendBox: Sendable {
     package let backend: any ServerInferenceBackend
 

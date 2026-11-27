@@ -438,19 +438,13 @@ extension MemoryBackend {
 /// memory type is constructed.
 public enum ServerMemoryFactory {
     /// - Parameters:
-    ///   - modelsDirectory: where a side-engine install is looked up. Nil
-    ///     leaves the engine off unless a directory is named in the
-    ///     environment, and an engine that is off changes nothing.
-    ///   - isClientGenerating: read before every token the side-engine
-    ///     produces, so it takes one thread while a person is waiting and the
-    ///     performance cores in the gaps. The background retrieval pass gates
-    ///     on the same read — `isIdle` is its inverse — so T7 runs only in a
-    ///     window where nobody is waiting. Nil leaves the width alone and the
-    ///     pass ungated, which is what a test or a benchmark wants.
+    ///   - isClientGenerating: the read the background retrieval pass gates
+    ///     on — `isIdle` is its inverse — so a pass runs only in a window where
+    ///     nobody is waiting. Nil leaves the pass ungated, which is what a test
+    ///     or a benchmark wants.
     package static func wrap(
         _ backend: any ServerInferenceBackend,
         configuration: MemoryConfiguration = .fromEnvironment(),
-        modelsDirectory: String? = nil,
         isClientGenerating: (@Sendable () -> Bool)? = nil
     )
         -> any ServerInferenceBackend
@@ -459,23 +453,18 @@ public enum ServerMemoryFactory {
             if let reason = configuration.disabledReason { ServerLog.memory(reason) }
             return backend
         }
-        // Built before the service because the service holds the port. The
-        // weights are not read until the first judgement.
-        let sideEngine = ServerSideEngineFactory.make(
-            modelsDirectory: modelsDirectory,
-            isClientGenerating: isClientGenerating)
-        // Spelled out rather than mapped: nesting the closure inside
-        // `MemoryService(...)`, or even inside an optional `map`, made the
-        // type checker crash rather than infer.
         let isIdle: (@Sendable () -> Bool)?
         if let isClientGenerating {
             isIdle = { !isClientGenerating() }
         } else {
             isIdle = nil
         }
+        // No side engine: its only implementation was a dense CPU model no
+        // shipped install provides (TT-142 slice (b)). The memory service
+        // keeps the optional port for a future judge.
         let service = MemoryService(
             configuration: configuration,
-            sideEngine: sideEngine.map { SideEngineMemoryAdapter(engine: $0) },
+            sideEngine: nil,
             isIdle: isIdle
         ) { event in
             ServerLog.memory(event.message)

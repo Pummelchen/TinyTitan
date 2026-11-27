@@ -79,11 +79,13 @@ package enum CatalogCommand {
     /// variants (the sources/Engines directories).
     ///
     /// `unshippedTargets` is the registry's own list of engine targets that are
-    /// in the tree but back no supported install (the dense family, TT-142 slice
-    /// (b)). It is an exclusion, not a loophole: a listed target has to exist and
-    /// be an engine variant, and it may not also be registered as one, so a
-    /// shipped engine cannot be hidden by naming it there. A new engine still
-    /// needs a registry entry or a deliberate exclusion.
+    /// in the tree but back no supported install. It is empty now (the dense
+    /// family left with TT-142 slice (b)); the mechanism stays so a deliberate
+    /// exclusion is visible rather than silent. It is an exclusion, not a
+    /// loophole: a listed target has to exist and be an engine variant, and it
+    /// may not also be registered as one, so a shipped engine cannot be hidden
+    /// by naming it there. A new engine still needs a registry entry or a
+    /// deliberate exclusion.
     package static func findings(
         registry: [String: Any], targets: Set<String>, variantTargets: Set<String>
     ) -> [String] {

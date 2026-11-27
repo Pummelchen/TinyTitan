@@ -177,9 +177,9 @@ package protocol ResidencyManaging: Sendable {
 /// Whether a client generation is running, readable without awaiting the
 /// coordinator.
 ///
-/// The CPU side-engine needs this before every token it produces, from
-/// whatever thread it happens to be on, and `await`ing an actor to decide
-/// how wide to run a GEMV would cost more than the decision is worth.
+/// Memory's background retrieval pass reads this from whatever thread it
+/// happens to be on, and `await`ing an actor to decide whether the machine is
+/// idle would cost more than the decision is worth.
 ///
 /// unchecked-invariant: `depth` is only ever read or written under `lock`.
 package final class GenerationSignal: @unchecked Sendable {

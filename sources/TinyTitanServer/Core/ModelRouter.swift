@@ -3,7 +3,6 @@ import TinyTitanLib
 import TinyTitanCore
 import TinyTitanPluginAPI
 import TinyTitanVariants
-import TinyTitanCPUEngine
 
 /// What the HTTP layer needs to validate a request for one model before that
 /// model is resident: the omitted-sampling defaults, the max_tokens bound and
@@ -81,42 +80,24 @@ extension ReasoningFallback {
 }
 
 extension ModelRouter {
-    /// Loads entries the way the single-model paths do: a GPU install through
-    /// `ModelSessionPlan` with every server flag, a CPU snapshot through
-    /// `CPUModelBackend`. Reasoning comes from the router, fitted per model.
+    /// Loads entries the way the single-model path does: an install through
+    /// `ModelSessionPlan` with every server flag. Reasoning comes from the
+    /// router, fitted per model.
     package static func standardLoader(arguments: ServerArguments) -> Loader {
         let metal = SharedMetalContext()
         return { entry, reasoning in
-            switch entry.kind {
-            case .gpu:
-                // One plan factory for both front ends: a loader-built plan
-                // that drops a field is how `slots` silently stayed at one on
-                // the catalog path while the coordinator admitted four.
-                let plan = ModelSessionPlan.from(
-                    arguments: arguments,
-                    modelDirectory: entry.path,
-                    thinking: reasoning.thinking,
-                    reasoningEffort: reasoning.effort,
-                    mtpModelDirectory: nil)
-                // TT-097 Task 11: the shipped variant installs route to their
-                // dedicated engines; the identity read is the same bounded
-                // manifest read the plan's reasoning profile performs, and
-                // every identity without a shipped variant stays on the 6.x
-                // engine (TT-087).
-                return try await plan.makeSession(
-                    reusingContext: try await metal.context(),
-                    factory: EngineFactories.gpuFactory(directoryURL: entry.path))
-            case .cpu:
-                // `entry.quant` is the routed-expert width the catalog read
-                // from the install — the fact the variant CPU selection needs
-                // beside the hidden size the backend reads from the snapshot.
-                return try await CPUModelBackend(
-                    snapshotDirectory: entry.path,
-                    maximumContext: arguments.maxContext,
-                    resident: arguments.cpuResident,
-                    thinkingMode: reasoning.thinking,
-                    routedExpertWeightBits: entry.quant)
-            }
+            // One plan factory for both front ends: a loader-built plan
+            // that drops a field is how `slots` silently stayed at one on
+            // the catalog path while the coordinator admitted four.
+            let plan = ModelSessionPlan.from(
+                arguments: arguments,
+                modelDirectory: entry.path,
+                thinking: reasoning.thinking,
+                reasoningEffort: reasoning.effort,
+                mtpModelDirectory: nil)
+            return try await plan.makeSession(
+                reusingContext: try await metal.context(),
+                factory: EngineFactories.gpuFactory(directoryURL: entry.path))
         }
     }
 }
@@ -126,37 +107,19 @@ extension ModelRouter {
     /// renders a prompt, without loading any weights.
     package static let standardCounter: Counter = { entry, choice, request in
         _ = try GFTokenizer.requireModelDirectory(entry.path)
-        switch entry.kind {
-        case .gpu:
-            let pluginFolder = try? EngineFactories.gpuFactory(directoryURL: entry.path)
-                .tokenizerFolder?(entry.path)
-            guard
-                let folder = pluginFolder
-                    ?? GFTokenizer.tokenizerFolder(forModelDirectory: entry.path)
-            else {
-                throw GFTokenizerError.missingToolTemplate
-            }
-            let tokenizer = try await GFTokenizer.load(
-                from: folder,
-                thinkingMode: choice.thinking,
-                reasoningEffort: choice.effort)
-            return try ServerModelSession.promptTokenCount(request, tokenizer: tokenizer)
-        case .cpu:
-            // The folder, not the model directory: a `.ssdai` install keeps
-            // `tokenizer.json` in a `tokenizer/` sidecar, so handing
-            // `load(from:)` the model directory fails for every installed CPU
-            // model (the GPU branch above resolves the same way).
-            guard
-                let folder = GFTokenizer.resolvedTokenizerFolder(
-                    forModelDirectory: entry.path)
-            else {
-                throw GFTokenizerError.missingToolTemplate
-            }
-            let tokenizer = try await GFTokenizer.load(
-                from: folder,
-                thinkingMode: choice.thinking)
-            return try CPUModelBackend.promptTokenCount(request, tokenizer: tokenizer)
+        let pluginFolder = try? EngineFactories.gpuFactory(directoryURL: entry.path)
+            .tokenizerFolder?(entry.path)
+        guard
+            let folder = pluginFolder
+                ?? GFTokenizer.tokenizerFolder(forModelDirectory: entry.path)
+        else {
+            throw GFTokenizerError.missingToolTemplate
         }
+        let tokenizer = try await GFTokenizer.load(
+            from: folder,
+            thinkingMode: choice.thinking,
+            reasoningEffort: choice.effort)
+        return try ServerModelSession.promptTokenCount(request, tokenizer: tokenizer)
     }
 }
 
@@ -183,9 +146,8 @@ extension ServerArguments {
         directory: URL
     ) throws -> (thinking: ModelThinkingMode, effort: ModelReasoningEffort?) {
         guard let reasoningLevel else { return (thinkingMode, reasoningEffort) }
-        if !cpu,
-            let control = (try? EngineFactories.pluginRegistry.resolve(directory))?
-                .reasoningControl
+        if let control = (try? EngineFactories.pluginRegistry.resolve(directory))?
+            .reasoningControl
         {
             // A plugin that brings its own levels (TPP/1); the 6.x adapter
             // returns nil and its families keep their table below.
@@ -194,7 +156,7 @@ extension ServerArguments {
             ServerLog.residency("reasoning=\(level.rawValue)")
             return level == .off ? (.off, nil) : (.on, level.effort ?? .high)
         }
-        let kind = try ModelCatalog.Kind.resolve(directory: directory, cpu: cpu)
+        let kind = try ModelCatalog.Kind.resolve(directory: directory)
         let choice = try ReasoningFallback.choice(for: kind, requested: reasoningLevel)
         ServerLog.residency(
             "reasoning=\(choice.effective.rawValue)"

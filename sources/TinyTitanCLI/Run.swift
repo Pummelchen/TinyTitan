@@ -9,7 +9,6 @@
 import Foundation
 import Metal
 import TinyTitanLib
-import TinyTitanCPUEngine
 import TinyTitanCore
 import TinyTitanVariants
 
@@ -133,24 +132,13 @@ public func run(
             forceLogitsHead: !isPureGreedy,
             logSink: logSink)
         configuration.contextWindowExplicit = args.maxContextWasSet
-        let cpuThinkingMode: ModelThinkingMode = thinkingMode == .on ? .on : .off
-        let engine: any EngineFacade
-        if args.engine == .cpu {
-            let factory = try EngineFactories.routingCPUFactory(directoryURL: modelURL)
-            engine = try await CPUEngine(
-                snapshotDirectory: modelURL,
-                factory: factory,
-                maximumContext: configuration.contextWindow,
-                thinkingMode: cpuThinkingMode)
-        } else {
-            guard let device = MTLCreateSystemDefaultDevice() else {
-                return errored(stderr, "no Metal device", 1)
-            }
-            engine = try await Engine(
-                directory: modelURL, device: device,
-                factory: try EngineFactories.routingFactory(directoryURL: modelURL),
-                configuration: configuration)
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            return errored(stderr, "no Metal device", 1)
         }
+        let engine = try await Engine(
+            directory: modelURL, device: device,
+            factory: try EngineFactories.routingFactory(directoryURL: modelURL),
+            configuration: configuration)
         // The one request would arrive before any layer is warm and stop the
         // warm-up at once, so the CLI lets it finish (it logs its own line;
         // TINYTITAN_WARM_EXPERTS=0 skips it).

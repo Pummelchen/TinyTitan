@@ -71,33 +71,16 @@ extension ModelCatalog {
             return .failure(
                 ProbeFailure(reason: "no tokenizer/tokenizer.json; the install is incomplete"))
         }
-        let preferred = identity.engines.first ?? .gpu
-        let engines = identity.engines.isEmpty ? [preferred] : identity.engines
-        let kind: Kind
-        switch preferred {
-        case .gpu:
-            kind = .gpu(family: identity.family, reasoning: identity.reasoningControl)
-        case .cpu:
-            kind = .cpu(family: identity.family, reasoning: identity.reasoningControl)
-        }
         return .success(
             Entry(
                 id: identity.catalogID,
                 name: identity.displayName,
-                kind: kind,
+                kind: .gpu(family: identity.family, reasoning: identity.reasoningControl),
                 quant: identity.weightBits,
                 path: directory,
                 sampling: identity.sampling,
                 contextLimit: identity.contextLimit,
-                sizeBytes: sizeOnDisk(directory),
-                engines: engines.map(backend(for:))))
-    }
-
-    package static func backend(for engine: ModelEngine) -> Backend {
-        switch engine {
-        case .gpu: .gpu
-        case .cpu: .cpu
-        }
+                sizeBytes: sizeOnDisk(directory)))
     }
 
     /// Allocated bytes, so an APFS clone or a sparse file reports what it

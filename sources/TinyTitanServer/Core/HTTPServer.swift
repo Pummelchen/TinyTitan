@@ -102,9 +102,9 @@ public actor TinyTitanHTTPServer {
         self.group = group
         self.modelID = modelID
         self.backend = backend
-        // Injectable so a resident side-engine can read the same
+        // Injectable so memory's background retrieval pass can read the same
         // `generating` signal the coordinator raises for every client
-        // generation, which is how it chooses its width.
+        // generation, and stay out of a waiting client's way.
         self.coordinator =
             coordinator
             ?? ServerCoordinator(

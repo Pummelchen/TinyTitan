@@ -6,7 +6,6 @@ import TinyTitanMemory
 import TinyTitanServerCore
 import TinyTitanPluginAPI
 import TinyTitanVariants
-import TinyTitanCPUEngine
 
 let arguments: ServerArguments
 do {
@@ -51,7 +50,7 @@ do {
     // The plugin's parameter table (TPP/1 §4): an explicit value the engine
     // cannot honour is refused with its reason; a default it cannot honour is
     // replaced by the engine's own, announced rather than ignored.
-    if arguments.modelsDirectory == nil, !arguments.cpu,
+    if arguments.modelsDirectory == nil,
         let resolved = try? EngineFactories.pluginRegistry.resolve(modelURL)
     {
         let gate = PluginParameterGate.check(arguments, plugin: resolved)
@@ -65,9 +64,6 @@ do {
         arguments.modelsDirectory == nil
         ? try arguments.singleModelReasoning(directory: modelURL)
         : (thinking: arguments.thinkingMode, effort: arguments.reasoningEffort)
-    // Built lazily: the CPU engine serves an affine snapshot, which has no
-    // manifest and would be rejected by a plan that expects an install.
-    // Constructing it eagerly printed that rejection on every CPU launch.
     // Batched serving: one runner with this many KV/GDN slots, and a
     // coordinator that admits that many at once. `sessionSlots` caps the width
     // to one under MTP, and both the plan and the coordinator read it so they
@@ -89,13 +85,11 @@ do {
     var managed: ManagedModelBackend?
     var router: ModelRouter?
     /// The initial model's engine, set on the catalog path so the routing banner
-    /// can name it beside `prompt_cache`: the two only make sense together,
-    /// because a CPU entry has no cache and reports `.off` rather than the mode
-    /// the server was asked for.
+    /// can name it beside `prompt_cache`. Every route is a GPU plugin (TT-142
+    /// slice (b)), so it is a constant rather than a per-entry field.
     var initialEngine: String?
-    // The reasoning profile comes from an install's manifest, which a CPU
-    // snapshot does not have. These models carry no reasoning-effort control
-    // either, so the profile is the family's plain default.
+    // The reasoning profile a single-model server resolved before the session
+    // exists; the catalog path takes it from the routed entry instead.
     var reasoningProfile: ServerReasoningProfile?
 
     if let modelsDirectory = arguments.modelsDirectory {
@@ -117,62 +111,23 @@ do {
         if !arguments.lazyLoad {
             try await routing.preload()
         }
-        let gpu = catalog.entries.filter { $0.backend == .gpu }.count
         print(
-            "catalog: \(catalog.entries.count) models (\(gpu) gpu, "
-                + "\(catalog.entries.count - gpu) cpu) in \(catalog.directory.path); "
+            "catalog: \(catalog.entries.count) models in \(catalog.directory.path); "
                 + (arguments.lazyLoad
                     ? "\(initial.id) loads on the first request" : "loaded \(initial.id)"))
         router = routing
         backend = routing
-        initialEngine = initial.backend.rawValue
+        initialEngine = "gpu"
         facts = ModelSessionFacts(
             modelID: initial.id,
             prefillChunkTokens: 0,
-            // The mode the initial model will really run,
-            // not the one requested: the rule lives in
-            // `initialPromptCacheMode` so the banner, the
-            // residency line and a test all read the same
-            // answer, and the CPU arm is testable without
-            // a catalog on disk.
+            // The mode the initial model will really run, not the one
+            // requested: the rule lives in `initialPromptCacheMode` so the
+            // banner, the residency line and a test all read the same answer.
             promptCacheMode: ServerModelSession.initialPromptCacheMode(
-                backend: initial.backend,
                 requested: arguments.promptCacheMode,
                 maxConcurrentSequences: concurrency))
         reasoningProfile = routing.servedModel(named: initial.id)?.reasoningProfile
-    } else if arguments.cpu {
-        // A different engine entirely: no Metal context, no expert
-        // streaming, no prompt cache. Everything above it -- both API
-        // surfaces, the memory subsystem, the watchdogs -- is unchanged,
-        // which is the point of putting it behind the same protocol.
-        let directory = URL(fileURLWithPath: arguments.model).standardizedFileURL
-        let started = ContinuousClock.now
-        let cpuBackend = try await CPUModelBackend(
-            snapshotDirectory: directory,
-            maximumContext: arguments.maxContext,
-            resident: arguments.cpuResident,
-            thinkingMode: reasoning.thinking)
-        backend = cpuBackend
-        let elapsed = started.duration(to: .now)
-        let seconds =
-            Double(elapsed.components.seconds)
-            + Double(elapsed.components.attoseconds) / 1e18
-        let identifier =
-            arguments.modelIDOverride
-            ?? directory.lastPathComponent
-        facts = ModelSessionFacts(
-            modelID: identifier,
-            prefillChunkTokens: 0,
-            promptCacheMode: .off,
-            expertCacheSlots: 0)
-        print(
-            String(
-                format: "CPU engine: %@ %@in %.1fs, %d threads",
-                identifier,
-                cpuBackend.residentBytes > 0
-                    ? "\(cpuBackend.residentBytes / 1_000_000) MB resident, " : "",
-                seconds, cpuBackend.threads))
-        reasoningProfile = ModelCatalog.Kind.cpuReasoningProfile(thinking: reasoning.thinking)
     } else if arguments.managesResidency {
         let plan = makePlan()
         // Reads manifest.json only; a bad --model still fails here at launch
@@ -199,19 +154,16 @@ do {
             expertCacheSlots: session.expertCacheSlots)
     }
 
-    // The coordinator owns the "a client generation is in flight" signal, and
-    // the resident side-engine reads it to choose its width, so it is built
-    // here and handed to both.
+    // The coordinator owns the "a client generation is in flight" signal, which
+    // memory's background pass reads to stay out of a waiting client's way.
     let coordinator = ServerCoordinator(
         queueLimit: arguments.queueLimit,
         width: concurrency)
 
     // Persistent memory wraps whatever backend was built: one decorator on
-    // the way in, and nothing at all when it is disabled. The side-engine is
-    // built inside, from `TINYTITAN_SIDE_ENGINE` or the default install.
+    // the way in, and nothing at all when it is disabled.
     let servingBackend = ServerMemoryFactory.wrap(
         backend,
-        modelsDirectory: arguments.modelsDirectory,
         isClientGenerating: { coordinator.generating.isBusy })
 
     let server = TinyTitanHTTPServer(
