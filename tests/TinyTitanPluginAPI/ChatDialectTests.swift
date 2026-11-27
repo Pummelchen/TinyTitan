@@ -34,18 +34,12 @@ struct ChatDialectTests {
 
     @Test func referenceDialectPropertiesMatchContracts() {
         let chatML = ChatMLDialect()
-        let k2 = K2Dialect()
         let inkling = InklingDialect()
 
         #expect(chatML.identifier == "chatml")
         #expect(chatML.supportsChatMLContinuationBridge)
         #expect(!chatML.closesThoughtOnMarkerText)
         #expect(!chatML.usesStructuredInklingParser)
-
-        #expect(k2.identifier == "k2")
-        #expect(k2.supportsChatMLContinuationBridge)
-        #expect(k2.closesThoughtOnMarkerText)
-        #expect(!k2.usesStructuredInklingParser)
 
         #expect(inkling.identifier == "inkling")
         #expect(!inkling.supportsChatMLContinuationBridge)

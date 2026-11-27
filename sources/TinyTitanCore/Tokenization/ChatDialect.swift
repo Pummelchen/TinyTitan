@@ -3,12 +3,12 @@ import Tokenizers
 
 /// A model's chat-formatting and structured-output dialect (TPP/1.1, TT-132).
 ///
-/// Core ships three reference implementations (`ChatMLDialect`, `K2Dialect`,
+/// Core ships two reference implementations (`ChatMLDialect`,
 /// `InklingDialect`). A plugin declares its dialect via
 /// `EnginePlugin.chatDialect(for:)` or supplies its own conformer without
 /// touching host switch tables.
 public protocol ChatDialect: Sendable {
-    /// Stable short identifier (e.g. `"chatml"`, `"k2"`, `"inkling"`).
+    /// Stable short identifier (e.g. `"chatml"`, `"inkling"`).
     var identifier: String { get }
     /// Whether the prompt cache may splice a ChatML multi-turn continuation
     /// bridge onto a cached assistant turn.
@@ -17,7 +17,7 @@ public protocol ChatDialect: Sendable {
     /// when the tokenizer emits no distinct end-of-thought token.
     var closesThoughtOnMarkerText: Bool { get }
     /// Whether assistant streams use the structured Inkling message parser
-    /// instead of the ChatML/K2 marker-pair state machine.
+    /// instead of the marker-pair state machine.
     var usesStructuredInklingParser: Bool { get }
 
     /// Tokens that may end a constrained structured (JSON-schema) answer.
@@ -81,53 +81,6 @@ public struct ChatMLDialect: ChatDialect, Equatable, Sendable {
     }
 }
 
-/// Reference K2 dialect (`<|ifm|im_start|>`, `<ifm|think>`, `<ifm|tool_call>`).
-public struct K2Dialect: ChatDialect, Equatable, Sendable {
-    public init() {}
-
-    public var identifier: String { "k2" }
-    public var supportsChatMLContinuationBridge: Bool { true }
-    public var closesThoughtOnMarkerText: Bool { true }
-    public var usesStructuredInklingParser: Bool { false }
-
-    public func documentEndTokenIDs(for tokenizer: GFTokenizer) -> Set<Int32> {
-        tokenizer.stopTokenIDs
-    }
-
-    public func promptMessageMarkers(for tokenizer: GFTokenizer) -> PromptMessageMarkers {
-        .chatML(imStartID: tokenizer.imStartID)
-    }
-
-    public func encodePrompt(
-        messages: [GFTokenizer.Message],
-        tools: [GFTokenizer.FunctionDefinition],
-        usesToolTemplate: Bool,
-        structuredAnswer: Bool,
-        tokenizer: GFTokenizer
-    ) throws -> [Int32] {
-        if usesToolTemplate {
-            return try tokenizer.encodeToolChat(messages: messages, tools: tools)
-        }
-        let rendered = try tokenizer.applyChatTemplate(messages)
-        return tokenizer.encode(rendered, addBOS: false)
-    }
-
-    public func parseToolCall(
-        _ text: String,
-        allowedTools: Set<String>,
-        makeID: () -> String
-    ) throws -> ParsedToolCall {
-        let wrapped =
-            "<ifm|tool_calls><ifm|tool_call>\(text)</ifm|tool_call></ifm|tool_calls>"
-        let calls = try K2ToolCallParser.parse(
-            wrapped, allowedTools: allowedTools, format: .xml, makeID: makeID)
-        guard calls.count == 1 else {
-            throw ToolCallParserError.malformed
-        }
-        return calls[0]
-    }
-}
-
 /// Reference Inkling 2 structured-message dialect (`<|message_model|>`,
 /// `<|content_text|>`, `<|content_thinking|>`, `<|content_invoke_tool_json|>`).
 public struct InklingDialect: ChatDialect, Equatable, Sendable {
@@ -181,7 +134,6 @@ extension GFTokenizer {
     public var chatDialect: any ChatDialect {
         switch dialect {
         case .chatML: ChatMLDialect()
-        case .k2: K2Dialect()
         case .inkling: InklingDialect()
         }
     }

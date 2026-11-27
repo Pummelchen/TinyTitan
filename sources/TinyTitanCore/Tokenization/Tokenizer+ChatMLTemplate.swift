@@ -1,8 +1,8 @@
 import Foundation
 import Tokenizers
 
-// The prompt renderer: the K2 template path (through the installed tokenizer)
-// and the manual ChatML renderer the Qwen families use.
+// The prompt renderer: the installed tokenizer's template path and the manual
+// ChatML renderer the Qwen families use.
 //
 // Split out of `Tokenizer.swift` (2026-10-25) as pure code motion under the
 // 500-line-per-file rule. `generationSuffix` and `effortSystemInstruction`
@@ -11,15 +11,6 @@ extension GFTokenizer {
     public func applyChatTemplate(_ messages: [Message]) throws -> String {
         if dialect == .inkling {
             return inklingPromptText(messages: messages, tools: [], structuredAnswer: false)
-        }
-        // K2's template is not ChatML and has its own message schema (an
-        // assistant turn must carry a thinking field), so it is rendered by the
-        // installed template through the same path tools use. The manual
-        // ChatML renderer stays for the Qwen families.
-        if dialect == .k2 {
-            let ids = try encodeToolChat(messages: messages, tools: [])
-            return tokenizer.decode(
-                tokens: ids.map(Int.init), skipSpecialTokens: false)
         }
         return try chatMLChatTemplate(messages)
     }

@@ -34,10 +34,6 @@ extension GFTokenizer {
         let endOfTurnID: Int32
         let toolCallStartID: Int32
         let toolCallEndID: Int32
-        /// The outer `<ifm|tool_calls>` wrapper K2 writes around one or more
-        /// inner calls. Optional: the ChatML families wrap nothing.
-        let toolCallsStartID: Int32?
-        let toolCallsEndID: Int32?
         let toolResponseID: Int32
         let toolResponseEndID: Int32
         let channelStartID: Int32
@@ -48,8 +44,6 @@ extension GFTokenizer {
         let thinkEndMark: String
         let toolCallStartMark: String
         let toolCallEndMark: String
-        let toolCallsStartMark: String
-        let toolCallsEndMark: String
         let stopTokenIDs: Set<Int32>
         let vocabSize: Int
     }
@@ -117,8 +111,9 @@ extension GFTokenizer {
         return nil
     }
 
-    /// The tokenizer's control dialect. ChatML is the default dialect;
-    /// some families write `<|ifm|…>` markers instead.
+    /// The tokenizer's control dialect. ChatML is the default; a tokenizer
+    /// that spells its markers differently is resolved by its own control
+    /// token, and anything else is refused rather than guessed at.
     static func resolveSpecialTokens(
         _ tokenizer: any Tokenizer,
         reasoningEffort: ModelReasoningEffort?
@@ -127,7 +122,7 @@ extension GFTokenizer {
         if specialTokenID(tokenizer, "<|message_model|>") != nil {
             return try resolveInklingTokens(tokenizer)
         }
-        return try resolveK2Tokens(tokenizer, effort: reasoningEffort ?? .high)
+        throw GFTokenizerError.missingSpecialToken("<|im_start|>")
     }
 
     /// Inkling 2's dialect (`InklingChatTemplate`). A model turn is a run of
@@ -165,8 +160,6 @@ extension GFTokenizer {
             endOfTurnID: endSampling,
             toolCallStartID: invoke,
             toolCallEndID: endMessage,
-            toolCallsStartID: nil,
-            toolCallsEndID: nil,
             toolResponseID: toolTurn,
             toolResponseEndID: endMessage,
             channelStartID: thinking,
@@ -177,8 +170,6 @@ extension GFTokenizer {
             thinkEndMark: "",
             toolCallStartMark: "",
             toolCallEndMark: "",
-            toolCallsStartMark: "",
-            toolCallsEndMark: "",
             stopTokenIDs: Set([endSampling, endOfText] + foreign),
             // The tokenizer's own count; the logits rows are the model's
             // (`ArchConfig.vocabSize`), which is what the session sizes by.
@@ -214,8 +205,6 @@ extension GFTokenizer {
             endOfTurnID: imEnd,
             toolCallStartID: toolCallStart,
             toolCallEndID: toolCallEnd,
-            toolCallsStartID: nil,
-            toolCallsEndID: nil,
             toolResponseID: toolResponse,
             toolResponseEndID: toolResponseEnd,
             channelStartID: thinkStart,
@@ -226,8 +215,6 @@ extension GFTokenizer {
             thinkEndMark: "</think>",
             toolCallStartMark: "<tool_call>",
             toolCallEndMark: "</tool_call>",
-            toolCallsStartMark: "",
-            toolCallsEndMark: "",
             stopTokenIDs: [imEnd, endOfText],
             // At least the model's padded embedding/lm_head rows; larger when
             // the tokenizer's own vocab (derived from `convertIdToToken`)
@@ -235,64 +222,5 @@ extension GFTokenizer {
             vocabSize: max(
                 Self.derivedVocabSize(tokenizer) ?? 0,
                 Self.paddedLogitsVocabSize))
-    }
-
-    /// K2-Horizon's dialect: `<|ifm|im_start|>` turns, `<ifm|tool_call>` tool
-    /// blocks and `<ifm|think>` reasoning. The tool-call wrapper
-    /// (`<ifm|tool_calls>`) is left to `K2ToolCallParser`; the streaming
-    /// decoder buffers the inner call.
-    static func resolveK2Tokens(
-        _ tokenizer: any Tokenizer,
-        effort: ModelReasoningEffort
-    ) throws -> ResolvedSpecialTokens {
-        func id(_ token: String) throws -> Int32 {
-            guard let value = specialTokenID(tokenizer, token) else {
-                throw GFTokenizerError.missingSpecialToken(token)
-            }
-            return Int32(value)
-        }
-        let imStart = try id("<|ifm|im_start|>")
-        let imEnd = try id("<|ifm|im_end|>")
-        let endOfText = try id("<|ifm|endoftext|>")
-        let toolCallStart = try id("<ifm|tool_call>")
-        let toolCallEnd = try id("</ifm|tool_call>")
-        let toolResponse = try id("<tool_response>")
-        let toolResponseEnd = try id("</tool_response>")
-        // The generation prompt's tag is chosen by effort: high opens
-        // `<ifm|think>`, medium `<ifm|think_fast>`, low `<ifm|think_faster>`.
-        // The decoder has to follow the tag the prompt actually used.
-        let tag: String
-        switch effort {
-        case .medium: tag = "think_fast"
-        case .low: tag = "think_faster"
-        case .high, .xhigh: tag = "think"
-        }
-        let thinkStart = try id("<ifm|\(tag)>")
-        let thinkEnd = try id("</ifm|\(tag)>")
-        return ResolvedSpecialTokens(
-            dialect: .k2,
-            imStartID: imStart,
-            bosID: endOfText,
-            eosID: endOfText,
-            padID: endOfText,
-            endOfTurnID: imEnd,
-            toolCallStartID: toolCallStart,
-            toolCallEndID: toolCallEnd,
-            toolCallsStartID: try? id("<ifm|tool_calls>"),
-            toolCallsEndID: try? id("</ifm|tool_calls>"),
-            toolResponseID: toolResponse,
-            toolResponseEndID: toolResponseEnd,
-            channelStartID: thinkStart,
-            channelEndID: thinkEnd,
-            thinkStartID: thinkStart,
-            thinkEndID: thinkEnd,
-            thinkStartMark: "<ifm|\(tag)>",
-            thinkEndMark: "</ifm|\(tag)>",
-            toolCallStartMark: "<ifm|tool_call>",
-            toolCallEndMark: "</ifm|tool_call>",
-            toolCallsStartMark: "<ifm|tool_calls>",
-            toolCallsEndMark: "</ifm|tool_calls>",
-            stopTokenIDs: [imEnd, endOfText],
-            vocabSize: max(Self.derivedVocabSize(tokenizer) ?? 0, 250_624))
     }
 }
