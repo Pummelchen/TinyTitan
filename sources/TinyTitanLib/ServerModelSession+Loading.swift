@@ -231,9 +231,17 @@ extension ServerModelSession {
         // why it was chosen. Written before the first request so the reason is
         // in the startup log even if no generation runs.
         ServerLog.diagnostic(runner.prefillTensorOpsLogLine)
+        // The lm_head is padded to the architecture's vocabulary, but the
+        // tokenizer's is smaller (248,077 against 248,320 for Qwen): a sampled
+        // id in the gap has no token, and the detokenizer's refusal fails the
+        // request. Sampling over the narrower width makes those ids
+        // unreachable, and costs nothing for any id a checkpoint can produce
+        // (AUD-0101).
+        let samplingVocabulary = Self.samplingVocabulary(
+            architecture: model.config.vocabSize, tokenizer: tokenizer.vocabSize)
         let scratches = try (0..<effectiveSlots).map { _ in
             try factory.makeScratch(
-                context, model.config.vocabSize, Float(model.config.finalLogitSoftcap))
+                context, samplingVocabulary, Float(model.config.finalLogitSoftcap))
         }
         // Bounded like every other document copied into a model directory: the
         // installed template measures 8,952 bytes, and the digest below is taken
@@ -355,5 +363,15 @@ extension ServerModelSession {
         // would keep it out of the planner.
         if warmExperts { await session.startExpertWarmup() }
         return session
+    }
+
+    /// The width the sampler may pick from: the narrower of the head's padded
+    /// vocabulary and the tokenizer's own. An id past the tokenizer's count has
+    /// no token, so the detokenizer refuses it and the request 500s; sampling
+    /// over the tokenizer's width makes it unreachable (AUD-0101). A tokenizer
+    /// that reports no vocabulary leaves the architecture's width alone.
+    package static func samplingVocabulary(architecture: Int, tokenizer: Int) -> Int {
+        guard tokenizer > 0 else { return architecture }
+        return min(architecture, tokenizer)
     }
 }
