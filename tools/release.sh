@@ -258,10 +258,9 @@ SKIP_GOLDENS_REASON="${TINYTITAN_RELEASE_SKIP_GOLDENS_REASON:-}"
 #   * the MTP draft head -- a sidecar to a target whose own baseline already
 #     exercises it, not a served model.
 #
-# The dense Qwen 3.5 2B/4B/9B were listed here too, because they had no stored
-# baseline at all: a release verified them through neither path, and capturing
-# one was an open item. They now have targets of their own, so they moved into
-# check_golden and out of this list.
+# The dense Qwen 3.5 2B/4B/9B were listed here once, because they had no stored
+# baseline at all. They were deleted with TT-142 slice (b) (2026-11-28), so no
+# dense install is a golden target and this list holds only a sidecar.
 # The names may be laid out one per line for readability; NON_GOLDEN_SET folds
 # the whitespace to single spaces first, because the match below is a
 # space-delimited substring test and a name that ends a line has no trailing
