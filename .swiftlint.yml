@@ -40,6 +40,13 @@ excluded:
   # leaves there.
   - examples/embedded/.build
   - examples/plugin/.build
+  # Agent worktrees are whole checkouts of this repository under
+  # `.agent-worktrees/`, each with its own `.build`. The root `.build` entry
+  # does not reach them, so the gate linted SwiftPM's generated
+  # `test_entry_point.swift` there and reported violations nobody wrote (a
+  # duplicate import, a force unwrap) from a checkout that is not this one.
+  # Every worktree runs its own gates; this run covers this tree's source.
+  - .agent-worktrees
 
 disabled_rules:
   # Layout, owned by swift-format.
