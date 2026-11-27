@@ -38,10 +38,17 @@ import Testing
     }
 
     private static func buffer<T>(_ device: MTLDevice, _ values: [T]) throws -> MTLBuffer {
-        let made = values.withUnsafeBytes { raw -> MTLBuffer? in
+        // `makeBuffer(bytes:length:)` copies `length` bytes, so asking for 16
+        // from a 4-byte array read 12 bytes past it (ASan: heap-buffer-overflow
+        // in `newBufferWithBytes:length:`). Pad the copy instead: a kernel that
+        // reads a 16-byte minimum still sees zeros, and the copy stays inside
+        // the array it was given.
+        let bytes = values.withUnsafeBytes { Array($0) }
+        var padded = [UInt8](repeating: 0, count: max(bytes.count, 16))
+        padded.replaceSubrange(0..<bytes.count, with: bytes)
+        let made = padded.withUnsafeBytes { raw -> MTLBuffer? in
             guard let base = raw.baseAddress else { return nil }
-            return device.makeBuffer(
-                bytes: base, length: max(raw.count, 16), options: .storageModeShared)
+            return device.makeBuffer(bytes: base, length: raw.count, options: .storageModeShared)
         }
         guard let made else { throw MetalError.bufferAllocationFailed("test operand") }
         return made

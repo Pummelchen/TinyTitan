@@ -127,7 +127,11 @@ final class InklingMTPWeights {
         }
         let fusePtr = (buf.contents() + fuseEntry.operand.offset)
             .bindMemory(to: UInt16.self, capacity: rowCount * tapCount)
-        var alphaHost = [Float](repeating: 0, count: rowCount * tapCount)
+        // `makeBuffer(bytes:length:)` copies `length` bytes from the array, and
+        // the GPU reads a 16-byte minimum, so the array itself is padded to four
+        // floats: a geometry with fewer would otherwise make the copy read past
+        // the end (ASan: dynamic-stack-buffer-overflow).
+        var alphaHost = [Float](repeating: 0, count: max(rowCount * tapCount, 4))
         for r in 0..<rowCount {
             var vals = (0..<tapCount).map { c -> Float in
                 Float(bitPattern: UInt32(fusePtr[r * tapCount + c]) << 16)
@@ -139,7 +143,7 @@ final class InklingMTPWeights {
         }
         guard
             let alphaBuf = device.makeBuffer(
-                bytes: &alphaHost, length: max(alphaHost.count * 4, 16),
+                bytes: &alphaHost, length: alphaHost.count * 4,
                 options: .storageModeShared)
         else { throw MetalError.bufferAllocationFailed("Inkling MTP fuseAlpha") }
         self.fuseAlpha = alphaBuf

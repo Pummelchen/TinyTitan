@@ -65,11 +65,19 @@ final class InklingQ4Ops {
         ] {
             pipelines[name] = try context.pipeline(name)
         }
-        var zero: Int32 = 0
-        guard
-            let buffer = context.device.makeBuffer(
-                bytes: &zero, length: 16, options: .storageModeShared)
-        else { throw MetalError.bufferAllocationFailed("zero expert id") }
+        // The GPU reads a 16-byte minimum from this buffer, so it is backed by
+        // 16 bytes of zeros. It used to be `var zero: Int32 = 0` copied with
+        // `length: 16`, which read 12 bytes past the variable (ASan:
+        // dynamic-stack-buffer-overflow in `newBufferWithBytes:length:`).
+        let zeros: [Int32] = [0, 0, 0, 0]
+        let zeroBuffer = zeros.withUnsafeBytes { raw -> MTLBuffer? in
+            guard let base = raw.baseAddress else { return nil }
+            return context.device.makeBuffer(
+                bytes: base, length: raw.count, options: .storageModeShared)
+        }
+        guard let buffer = zeroBuffer else {
+            throw MetalError.bufferAllocationFailed("zero expert id")
+        }
         zeroID = buffer
     }
 
