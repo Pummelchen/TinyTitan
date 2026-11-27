@@ -61,7 +61,6 @@ class BenchmarkProfileTests(unittest.TestCase):
         self.assertIn(catalog_id_for(model), self.installs.ids)
         self.assertEqual(command[command.index("--port") + 1], "8081")
         self.assertEqual(command[command.index("--thinking") + 1], "off")
-        self.assertEqual(command[command.index("--engine") + 1], "gpu")
         self.assertEqual(command[command.index("--kv") + 1], str(DEFAULT_KV_BITS))
         # Production profile: the launcher's own multi-prefix cache, no draft
         # head, and the model's measured expert-cache budget rather than a pin.
@@ -103,7 +102,7 @@ class BenchmarkProfileTests(unittest.TestCase):
         # explicit `--ram` override, which must stay opt-in so the default path
         # keeps the measured optimum.
         self.assertIn('gpu_runtime+=(--ram-budget "${ram_gb}G")', launcher)
-        self.assertIn('if [[ -n "$ram_gb" && "$MODEL_BACKEND" != "cpu" ]]', launcher)
+        self.assertIn('if [[ -n "$ram_gb" ]]; then', launcher)
         self.assertIn("${TINYTITAN_THINKING_MODE:-off}", launcher)
         # The dynamic path takes the reasoning level the catalog says the
         # model supports (`--reasoning`); the single-model fallback for a

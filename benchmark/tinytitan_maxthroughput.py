@@ -19,8 +19,7 @@ names no prompt is a refusal with exit 2 rather than a `SystemExit` during impor
 and a typo beside a real name is refused instead of silently narrowing the ladder.
 
 Usage:
-    python3 benchmark/tinytitan_maxthroughput.py [--mtp <draft-dir>] \\
-        [--engine cpu|gpu] [model...]
+    python3 benchmark/tinytitan_maxthroughput.py [--mtp <draft-dir>] [model...]
     MAXTPUT_PROMPTS=essay python3 benchmark/tinytitan_maxthroughput.py
     cd benchmark && python3 -m unittest test_tinytitan_maxthroughput
 """
@@ -98,8 +97,8 @@ def select_prompts(value):
     return [prompt for prompt in PROMPTS if prompt[0] in set(wanted)]
 
 
-def model_label(model, engine):
-    """The row's name: the width the install advertises, plus the engine.
+def model_label(model):
+    """The row's name: the width the install advertises.
 
     The width is read off the directory because that is all the driver knows about
     the install, and a name carrying no width keeps its own basename — the old
@@ -110,36 +109,27 @@ def model_label(model, engine):
     label = next((width for width in WIDTHS if width in lowered), None)
     if label is None:
         label = os.path.basename(os.path.normpath(model)) or "model"
-    return f"{label}-cpu" if engine == "cpu" else label
+    return label
 
 
 def parse_args(argv):
-    """`(models, draft-head-dir, engine)`; `--engine cpu` is the only way to run
-    the dense Qwen 3.5 models, and the label carries it so a CPU row cannot be
-    mistaken for a GPU one."""
-    models, mtp, engine = [], None, "gpu"
+    """`(models, draft-head-dir)`. Every served install is a GPU plugin; the
+    engine selector left with the CPU engine (TT-142 slice (b))."""
+    models, mtp = [], None
     index = 0
     while index < len(argv):
         arg = argv[index]
-        if arg in ("--mtp", "--engine"):
+        if arg == "--mtp":
             if index + 1 >= len(argv):
                 raise ConfigError(f"{arg} needs its value")
-            value = argv[index + 1]
-            if arg == "--mtp":
-                mtp = value
-            else:
-                if value not in ("cpu", "gpu"):
-                    raise ConfigError(f"--engine must be cpu or gpu, not {value}")
-                engine = value
+            mtp = argv[index + 1]
             index += 2
         elif arg.startswith("-"):
-            raise ConfigError(
-                f"unknown flag {arg}; the flags are --mtp <draft-dir> and --engine cpu|gpu"
-            )
+            raise ConfigError(f"unknown flag {arg}; the flags are --mtp <draft-dir>")
         else:
             models.append(arg)
             index += 1
-    return models, mtp, engine
+    return models, mtp
 
 
 def decode_rates(lines):
@@ -189,12 +179,12 @@ def arm_report(label, prompts, rates, cts):
     return lines, 0
 
 
-def run_quant(model, label, prompts, mtp_model=None, engine="gpu"):
+def run_quant(model, label, prompts, mtp_model=None):
     """One server, the whole ladder against it, and that arm's (lines, status)."""
     log_path = benchmark_log_path(f"maxtput_{label}.log")
     with open(log_path, "w", encoding="utf-8") as log:
         proc = subprocess.Popen(
-            server_command(BIN, PORT, model=model, mtp_model=mtp_model, engine=engine),
+            server_command(BIN, PORT, model=model, mtp_model=mtp_model),
             env=server_environment(),
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -219,7 +209,7 @@ def run_quant(model, label, prompts, mtp_model=None, engine="gpu"):
 
 def main() -> int:
     try:
-        models, mtp, engine = parse_args(sys.argv[1:])
+        models, mtp = parse_args(sys.argv[1:])
         prompts = select_prompts(os.environ.get(PROMPT_ENV))
     except ConfigError as error:
         print(f"REFUSED: {error}", file=sys.stderr)
@@ -229,8 +219,7 @@ def main() -> int:
     names = ", ".join(name for name, _ in prompts)
     print(
         f"peak-throughput probe: {len(chosen)} model(s) x {len(prompts)} prompt(s) ({names}) "
-        f"x {REQUESTS_PER_PROMPT} requests at {MAX_TOKENS} tokens, engine={engine}, "
-        f"port {PORT}"
+        f"x {REQUESTS_PER_PROMPT} requests at {MAX_TOKENS} tokens, port {PORT}"
     )
     if mtp:
         print(
@@ -240,12 +229,12 @@ def main() -> int:
     status = 0
     for model in chosen:
         print(f"--- {model} ---", flush=True)
-        label = model_label(model, engine)
+        label = model_label(model)
         arms = [(label, None)]
         if mtp:
             arms.append((f"{label}-mtp", mtp))
         for arm_label, draft in arms:
-            lines, arm_status = run_quant(model, arm_label, prompts, mtp_model=draft, engine=engine)
+            lines, arm_status = run_quant(model, arm_label, prompts, mtp_model=draft)
             for line in lines:
                 print(line, flush=True)
             status = status or arm_status

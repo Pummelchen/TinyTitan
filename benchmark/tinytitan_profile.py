@@ -159,27 +159,23 @@ def server_command(
     thinking_mode: str = DEFAULT_THINKING_MODE,
     ram_budget: str | None = DEFAULT_EXPERT_CACHE_BUDGET,
     mtp_model: str | os.PathLike[str] | None = None,
-    engine: str = "gpu",
 ) -> list[str]:
     """Build the launcher invocation for the standard production profile.
 
     Every harness starts its server through `tools/server_launcher.sh`, so a
     benchmarked server is configured the way a user's server is: the catalog
     resolves the install, the model's own `ModelProfile` supplies the expert
-    cache, prefetch and sampling, and the launcher refuses an engine the family
-    does not implement. That single seam is also what keeps the harnesses inside
+    cache, prefetch and sampling. That single seam is also what keeps the harnesses inside
     the release policy -- the launcher only ever uses installs already under
     `models/`.
 
     `binary` is the release binary the caller resolved; the launcher starts that
     same path, so this only checks that a path-shaped argument is really there.
     `mtp_model` attaches a draft-head sidecar, the only way to reach the
-    speculative path. `engine` is cpu or gpu.
+    speculative path.
     """
     if thinking_mode not in SUPPORTED_THINKING_MODES:
         raise ValueError("thinking_mode must be off or on")
-    if engine not in ("cpu", "gpu"):
-        raise ValueError("engine must be cpu or gpu")
     if cache_mode not in ("multi-prefix", "off"):
         raise ValueError("cache_mode must be multi-prefix or off")
     binary_path = pathlib.Path(binary)
@@ -196,8 +192,6 @@ def server_command(
         str(port),
         "--thinking",
         thinking_mode,
-        "--engine",
-        engine,
         "--kv",
         str(DEFAULT_KV_BITS),
     ]
@@ -207,7 +201,7 @@ def server_command(
         command += ["--prompt-cache", "off"]
     if mtp_model is not None:
         command += ["--mtp-model", str(mtp_model)]
-    if ram_budget is not None and engine == "gpu":
+    if ram_budget is not None:
         command += ["--ram", str(ram_budget)]
     return command
 

@@ -297,16 +297,16 @@ TINYTITAN_ALL_MODELS=(ornith inkling-q4-k-xl-unsloth inkling2mini)
 
 # --- Installed models, from the server's catalog -----------------------
 #
-# The server knows what is installed -- GPU installs and CPU snapshots,
-# their ids, widths and the thinking levels each one supports -- so the
-# launcher asks it instead of keeping a second list that goes stale:
+# The server knows what is installed -- completed GPU installs, their ids,
+# widths and the thinking levels each one supports -- so the launcher asks it
+# instead of keeping a second list that goes stale:
 # `TinyTitanServer --catalog --models-dir <dir>` prints JSON. TINYTITAN_CATALOG_JSON
 # reads the same JSON from a file instead, so the launcher can be exercised
 # against tools/testdata/catalog-example.json without a build.
 #
 # tinytitan_load_catalog <binary> <models-dir> fills parallel arrays, one entry
 # per model and quantization, GPU entries first:
-#   TINYTITAN_CAT_ID  TINYTITAN_CAT_NAME  TINYTITAN_CAT_QUANT (4|8)  TINYTITAN_CAT_BACKEND (gpu|cpu)
+#   TINYTITAN_CAT_ID  TINYTITAN_CAT_NAME  TINYTITAN_CAT_QUANT (4|8)  TINYTITAN_CAT_BACKEND (gpu)
 #   TINYTITAN_CAT_PATH  TINYTITAN_CAT_THINKING (comma-separated, off first)  TINYTITAN_CAT_SIZE (GB, or -)
 #   TINYTITAN_CAT_FAMILY (the manifest's family, e.g. qwen36)
 #   TINYTITAN_CAT_ENGINES (comma-separated engines that can serve it, default first)
@@ -330,12 +330,12 @@ except (ValueError, KeyError, TypeError) as error:
     sys.exit("catalog: not the expected JSON (%s)" % error)
 if not isinstance(models, list):
     sys.exit("catalog: \"models\" is not a list")
-gpu, cpu = [], []
+rows = []
 for model in models:
     try:
         backend = field(model["backend"])
-        if backend not in ("gpu", "cpu"):
-            raise ValueError("backend %r" % backend)
+        if backend != "gpu":
+            raise ValueError("backend %r is not a served engine" % backend)
         listed = [str(level) for level in (model.get("thinking") or ["off"])]
         levels = [l for l in LEVELS if l in listed] + [l for l in listed if l not in LEVELS]
         size = model.get("size_gb")
@@ -354,8 +354,8 @@ for model in models:
         name = model.get("id") if isinstance(model, dict) else model
         print("catalog: skipping %r (%s)" % (name, error), file=sys.stderr)
         continue
-    (gpu if backend == "gpu" else cpu).append(row)
-for row in gpu + cpu:
+    rows.append(row)
+for row in rows:
     print("\t".join(row))
 '
 

@@ -193,7 +193,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(status, 1, lines)
         self.assertNotIn("measured=", "\n".join(lines))
 
-    def test_the_label_is_carried_so_a_cpu_row_cannot_be_read_as_a_gpu_one(self):
+    def test_the_label_is_carried_into_every_report_line(self):
         prompts = [("essay", "p")]
         lines, _ = mtm.arm_report("4bit-cpu", prompts, [50.0, 49.0], [512, 512])
         self.assertTrue(all(line.startswith("4bit-cpu ") for line in lines), lines)
@@ -203,50 +203,42 @@ class LabelTests(unittest.TestCase):
     """The one-word width the page prints for an install."""
 
     def test_the_width_is_read_off_the_install_name(self):
-        self.assertEqual(mtm.model_label("models/ornith-1.5_35B_A3B_8Bit", "gpu"), "8bit")
-        self.assertEqual(mtm.model_label("models/x_4Bit", "gpu"), "4bit")
-        self.assertEqual(mtm.model_label("models/x_6bit", "gpu"), "6bit")
-
-    def test_the_engine_is_carried_in_the_label(self):
-        self.assertEqual(mtm.model_label("models/x_8Bit", "cpu"), "8bit-cpu")
+        self.assertEqual(mtm.model_label("models/ornith-1.5_35B_A3B_8Bit"), "8bit")
+        self.assertEqual(mtm.model_label("models/x_4Bit"), "4bit")
+        self.assertEqual(mtm.model_label("models/x_6bit"), "6bit")
 
     def test_an_install_that_names_no_width_is_not_labelled_a_width_it_did_not_claim(self):
         """ "8bit"/"6bit"/"4bit" else "4bit" meant any path without a width token
         was printed as a 4-bit run."""
-        self.assertNotIn(
-            mtm.model_label("models/my-uncased-checkpoint", "gpu"), ("4bit", "6bit", "8bit")
-        )
+        self.assertNotIn(mtm.model_label("models/my-uncased-checkpoint"), ("4bit", "6bit", "8bit"))
 
 
 class ArgumentTests(unittest.TestCase):
     """What the command line accepts, refused before a server starts."""
 
     def test_no_arguments_run_the_named_bench_model(self):
-        models, mtp, engine = mtm.parse_args([])
+        models, mtp = mtm.parse_args([])
         self.assertEqual(models, [])
         self.assertIsNone(mtp)
-        self.assertEqual(engine, "gpu")
 
     def test_positional_arguments_are_the_models(self):
-        models, _, _ = mtm.parse_args(["models/a_4Bit", "models/b_8Bit"])
+        models, _ = mtm.parse_args(["models/a_4Bit", "models/b_8Bit"])
         self.assertEqual(models, ["models/a_4Bit", "models/b_8Bit"])
 
-    def test_mtp_takes_a_directory_and_leaves_the_engine_alone(self):
-        models, mtp, engine = mtm.parse_args(["--mtp", "models/x_MTP_4Bit", "models/a_4Bit"])
+    def test_mtp_takes_a_directory(self):
+        models, mtp = mtm.parse_args(["--mtp", "models/x_MTP_4Bit", "models/a_4Bit"])
         self.assertEqual(mtp, "models/x_MTP_4Bit")
         self.assertEqual(models, ["models/a_4Bit"])
-        self.assertEqual(engine, "gpu")
 
-    def test_the_cpu_engine_is_an_explicit_choice(self):
-        self.assertEqual(mtm.parse_args(["--engine", "cpu"])[2], "cpu")
-
-    def test_an_unknown_engine_is_refused(self):
-        with self.assertRaises(mtm.ConfigError):
-            mtm.parse_args(["--engine", "metal"])
+    def test_the_engine_flag_is_gone(self):
+        # It selected between the GPU engine and a dense CPU engine that left
+        # with TT-142 slice (b); `--engine gpu` is no longer a spelling that
+        # selects anything, so it is an unknown flag.
+        for value in ("cpu", "gpu", "metal"):
+            with self.assertRaises(mtm.ConfigError):
+                mtm.parse_args(["--engine", value])
 
     def test_a_flag_without_its_value_is_refused(self):
-        with self.assertRaises(mtm.ConfigError):
-            mtm.parse_args(["--engine"])
         with self.assertRaises(mtm.ConfigError):
             mtm.parse_args(["--mtp"])
 
@@ -451,21 +443,10 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(spawned, [])
         self.assertIn("REFUSED", output)
 
-    def test_an_unknown_engine_is_refused_before_any_server_starts(self):
-        status, output, spawned, _ = self.run_main(["--engine", "metal", "models/x_4Bit"])
+    def test_the_removed_engine_flag_is_refused_before_any_server_starts(self):
+        status, output, spawned, _ = self.run_main(["--engine", "gpu", "models/x_4Bit"])
         self.assertEqual(status, 2, output)
         self.assertEqual(spawned, [])
-
-    def test_the_cpu_engine_reaches_the_launcher_and_the_label(self):
-        """A CPU row on a page of GPU rows is a different measurement; the label is
-        the only thing on the page that says which engine ran."""
-        status, output, spawned, _ = self.run_main(
-            ["--engine", "cpu", "models/x_8Bit"],
-            rates={name: [50.0, 49.0] for name in LADDER},
-        )
-        self.assertEqual(status, 0, output)
-        self.assertEqual(spawned[0]["engine"], "cpu")
-        self.assertIn("8bit-cpu", output)
 
     def test_main_returns_an_int_and_the_guard_exits_with_it(self):
         """The nine drivers in this seam called `main()` and threw the status away;

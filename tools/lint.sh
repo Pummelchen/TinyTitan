@@ -16,7 +16,7 @@
 #   stdout-clean        no stdout write anywhere in the library product's target closure
 #   silent-test-skip    no env/capability-shaped early return in tests/ (see below)
 #   test-hollow         no @Test body that cannot fail (see below)
-#   library-facade      TinyTitanLib + CPUEngine public surface allowlisted; no NIO import,
+#   library-facade      TinyTitanLib public surface allowlisted; no NIO import,
 #                       no stdout write (AGENTS.md "Two products" rules 1 and 3)
 #   docs                a documented count, mode name, tag->commit sha, ledger
 #                       commit reference or table shape must match what the
@@ -743,11 +743,11 @@ for index, (kind, start) in enumerate(spans):
         deps += re.findall(r'\.target\(name:\s*"([^"]+)"', text)
     targets[name.group(1)] = (kind, path.group(1), deps)
 
-# The roots are the TinyTitanLib *product* targets, not the facade target:
-# the product now carries the legacy engine, the variant factories and the CPU
-# engine, all of which an embedder links, so a stdout write in any of them is a
-# stdout write in the library. The product is read from the manifest so a
-# target added to it enters this gate on the same commit.
+# The roots are the TinyTitanLib *product* targets, not the facade target: the
+# product carries the variant factories and the plugin API, all of which an
+# embedder links, so a stdout write in any of them is a stdout write in the
+# library. The product is read from the manifest so a target added to it enters
+# this gate on the same commit.
 ROOT_TARGET = "TinyTitanLib"
 product = re.search(
     r'\.library\(\s*name:\s*"TinyTitanLib",\s*targets:\s*\[(.*?)\]',
@@ -1404,8 +1404,7 @@ check_swift_format() {
 
 # --- library facade ----------------------------------------------------------
 # `AGENTS.md`'s "Two products, one repository" makes three promises about
-# `sources/TinyTitanLib/` (and the `CPUEngine` facade), the surface an embedder
-# depends on: `public` there is
+# `sources/TinyTitanLib/`, the surface an embedder depends on: `public` there is
 # deliberate ("nothing becomes `public` by accident", rule 3), the library
 # "imports no NIO" and keeps stdout clean (rule 1). Measured 2026-10-06 all
 # three held and none of them was enforced anywhere: `tools/lint.sh` had
@@ -1437,7 +1436,6 @@ import os, re, sys
 root = os.environ["ROOT"]
 libs = [
     os.path.join(root, "sources", "TinyTitanLib"),
-    os.path.join(root, "sources", "TinyTitanCPUEngine"),
     # TPP/1 (TT-130): the plugin API is a promise to a plugin author.
     os.path.join(root, "sources", "TinyTitanPluginAPI"),
 ]
@@ -1497,7 +1495,7 @@ PY
 }
 
 check_library_facade() {
-  echo "== library-facade: the TinyTitanLib + CPUEngine + plugin API surface must be chosen, not inherited =="
+  echo "== library-facade: the TinyTitanLib + plugin API surface must be chosen, not inherited =="
   local raw rc scanned current unresolved
   raw="$(measure_library_facade)"
   rc=$?
@@ -1509,7 +1507,7 @@ check_library_facade() {
   scanned="$(echo "$raw" | sed -n 's/^SCANNED://p' | tail -1)"
   if [ -z "$scanned" ] || [ "$scanned" -eq 0 ] 2>/dev/null; then
     echo "  FAIL: no Swift files were scanned under the facade targets."
-    echo "        Expected ~30 in TinyTitanLib and ~3 in CPUEngine; check ROOT."
+    echo "        Expected ~30 in TinyTitanLib and a few in the plugin API; check ROOT."
     status=1
     return
   fi
@@ -1542,7 +1540,7 @@ check_library_facade() {
     new="$(comm -13 <(echo "$baseline") <(echo "$current"))"
     if [ -n "$new" ]; then
       echo "$new" | sed 's/^/  NEW: /'
-      echo "  FAIL: these are public in TinyTitanLib/CPUEngine and not in the allowlist."
+      echo "  FAIL: these are public in TinyTitanLib/plugin API and not in the allowlist."
       echo "        Make them package, or add them to ${FACADE_BASELINE#$ROOT/}"
       echo "        in the same PR that argues for them."
       status=1
@@ -1645,7 +1643,7 @@ check_variant_isolation() {
       case "$imp" in
         TinyTitanCore|TinyTitanFormat|Metal|MetalKit|Foundation|Accelerate|Compression|SystemPackage|Darwin|Synchronization|IOKit|TinyTitanKernelsC) ;;
         TinyTitan|TinyTitanLib|TinyTitanServerCore|TinyTitanRepackCore|TinyTitanCLICore) bad=1 ;;
-        TinyTitanVariants|TinyTitanCPUEngine) bad=1 ;;
+        TinyTitanVariants) bad=1 ;;
         *)
           # Another variant or plugin target: a sibling directory under
           # sources/Engines or sources/Plugins (TPP/1: a plugin is standalone).

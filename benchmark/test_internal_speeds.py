@@ -288,7 +288,6 @@ class CompareTests(unittest.TestCase):
                 "total_seconds": 6.0,
             },
             "gpu": {"qkv_gemv_gbps": 70.0, "routed_moe_gbps": 44.0, "gdn_inproj_gbps": 77.0},
-            "cpu": {"best_gbps": 43.0},
             "quality": {"keyword_coverage": 0.5, "response_sha256": "abc"},
         }
         for dotted, value in overrides.items():
@@ -334,7 +333,6 @@ class CompareTests(unittest.TestCase):
             "model": {"path": "models/qwen3.5_4B_4Bit", "prompt": "x"},
             "environment": {"git_describe": "v5.18"},
             "gpu": {"error": "qkv_gemv: exit 1", "output": "…"},
-            "cpu": {"error": "cpugemv: exit 1", "output": "…"},
             "generation": {"error": "cli exit 1", "stderr": "…"},
         }
         self.assertFalse(internal_speeds.compare(self.candidate(), broken, 10.0))

@@ -45,7 +45,6 @@ class SyntheticInstalls:
         self._catalog = catalog
         self._tmp: tempfile.TemporaryDirectory | None = None
         self.rows: list[dict] = []
-        self._cpu_id: str | None = None
 
     def create(self) -> "SyntheticInstalls":
         self._tmp = tempfile.TemporaryDirectory(prefix="tinytitan-launcher-fixture-")
@@ -97,41 +96,6 @@ class SyntheticInstalls:
             if row["backend"] == "gpu":
                 return row["id"]
         raise AssertionError(f"{CATALOG} lists no gpu-backed model")
-
-    def cpu_served(self) -> str:
-        """A CPU-served id, synthesised because no shipped install is one.
-
-        The concurrency tests need a model they can name to the CPU engine, and
-        the CPU backend still implements the dense family even though no dense
-        install is in the shipped matrix (TT-142 slice (b)). The row is added to
-        this tree and the catalog on first use and is deliberately not part of
-        the shipped fixture: it exists so the CPU rule is checked, not so the
-        family is advertised.
-        """
-        if self._cpu_id is not None:
-            return self._cpu_id
-        row = {
-            "id": "synthetic-dense_4-Bit",
-            "name": "Synthetic Dense",
-            "family": "qwen3_5_dense",
-            "quant": 4,
-            "backend": "cpu",
-            "path": str(self.models_dir / "synthetic-dense_4Bit"),
-            "thinking": ["off", "on"],
-            "engines": "gpu,cpu",
-            "size_gb": 1.3,
-        }
-        directory = pathlib.Path(row["path"])
-        directory.mkdir()
-        manifest = {
-            "modelID": "synthetic-dense",
-            "quant": {"routedExpert": {"weightBits": 4}},
-        }
-        (directory / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        self.rows.append(row)
-        self.catalog_path.write_text(json.dumps({"models": self.rows}, indent=2) + "\n")
-        self._cpu_id = row["id"]
-        return self._cpu_id
 
     def env(self, **extra: str) -> dict[str, str]:
         """A complete environment that points the launcher at this tree.
@@ -192,18 +156,22 @@ class SyntheticInstallsTests(unittest.TestCase):
 
     def test_the_selectors_the_suites_ask_for_exist(self) -> None:
         # A suite that silently lost its row would test a different model than it
-        # says it does, so both selectors are pinned to the shipped fixture.
+        # says it does, so the selector is pinned to the shipped fixture.
         gpu = self.installs.first_gpu()
         self.assertIn(gpu, self.installs.ids)
-        # The CPU row is synthesised on demand: no shipped install is CPU-served,
-        # and the row must not appear in the three-row catalog before it is asked
-        # for.
-        self.assertEqual(len(self.installs.ids), 3)
-        cpu = self.installs.cpu_served()
-        self.assertIn(cpu, self.installs.ids)
-        self.assertEqual(pathlib.Path(self.installs.path_of(cpu)).name, "synthetic-dense_4Bit")
+        self.assertTrue(pathlib.Path(self.installs.path_of(gpu)).is_dir())
         with self.assertRaises(KeyError):
             self.installs.path_of("no-such-model")
+
+    def test_every_row_is_gpu_served(self) -> None:
+        # The CPU engine left with TT-142 slice (b), and this fixture used to
+        # synthesise a dense CPU row for the concurrency suite. A row naming
+        # another engine now has no backend behind it, so the fixture must not
+        # carry one.
+        self.assertEqual(len(self.installs.ids), 3)
+        for row in self.installs.rows:
+            self.assertEqual(row["backend"], "gpu")
+            self.assertNotIn("cpu", row.get("engines", "gpu").split(","))
 
 
 if __name__ == "__main__":

@@ -21,7 +21,6 @@ ROOT = os.environ.get("ROOT") or os.path.abspath(
 )
 LIBS = [
     os.path.join(ROOT, "sources", "TinyTitanLib"),
-    os.path.join(ROOT, "sources", "TinyTitanCPUEngine"),
 ]
 
 IMPORT_NIO = re.compile(r"^\s*import\s+\S*NIO")

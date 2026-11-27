@@ -77,7 +77,6 @@ FOOTER = re.compile(
 )
 ACHIEVED = re.compile(r"achieved=([\d.]+) GB/s")
 BYTES_PER_LAUNCH = re.compile(r"bytes/launch=(\d+)")
-CPU_ROW = re.compile(r"^\s+(\d+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*$")
 
 # The prompt asks for a comparison, so a healthy answer names the languages and
 # the axes they differ on. Coverage is a proxy, not a grade: it moves when the
@@ -103,7 +102,6 @@ PERF_METRICS = {
     "gpu.qkv_gemv_gbps": "higher",
     "gpu.routed_moe_gbps": "higher",
     "gpu.gdn_inproj_gbps": "higher",
-    "cpu.best_gbps": "higher",
     "generation.prefill_tokens_per_second": "higher",
     "generation.decode_tokens_per_second": "higher",
     "generation.effective_decode_gbps": "higher",
@@ -232,28 +230,6 @@ def measure_kernel(kernel: str, iterations: int) -> dict:
     if launch:
         record["bytes_per_launch"] = int(launch.group(1))
     return record
-
-
-def measure_cpu_gemv(iterations: int) -> dict:
-    code, out, err = run([str(BENCH), "cpugemv", str(iterations)], timeout=600)
-    if code != 0:
-        return {"error": f"cpugemv: exit {code}", "output": (out + err)[-400:]}
-    rows = []
-    for line in out.splitlines():
-        match = CPU_ROW.match(line)
-        if match:
-            rows.append(
-                {
-                    "threads": int(match.group(1)),
-                    "ms_per_pass": float(match.group(2)),
-                    "gbps": float(match.group(3)),
-                    "tok_per_second_2b_8bit": float(match.group(4)),
-                }
-            )
-    if not rows:
-        return {"error": "cpugemv: no table rows parsed", "output": out[-400:]}
-    best = max(rows, key=lambda row: row["gbps"])
-    return {"best_gbps": best["gbps"], "best_threads": best["threads"], "rows": rows}
 
 
 def parse_footer(stderr: str) -> dict | None:
@@ -396,9 +372,6 @@ def measure(
     gpu["routed_moe_gbps"] = gpu["routed_moe"].get("gbps")
     gpu["gdn_inproj_gbps"] = gpu["gdn_inproj"].get("gbps")
 
-    print("measuring CPU GEMV...", flush=True)
-    cpu = measure_cpu_gemv(iterations)
-
     print(f"measuring generation on {model} ...", flush=True)
     generation = measure_generation(model, prompt, max_new, ram_budget=ram_budget)
 
@@ -464,7 +437,6 @@ def measure(
             "ram_budget": ram_budget,
         },
         "gpu": gpu,
-        "cpu": cpu,
         "generation": generation,
         "ane": ane,
         "quality": quality(generation),
@@ -620,8 +592,7 @@ def main() -> int:
     print(
         f"  gpu qkv {record['gpu']['qkv_gemv_gbps']} GB/s, "
         f"moe {record['gpu']['routed_moe_gbps']} GB/s, "
-        f"gdn {record['gpu']['gdn_inproj_gbps']} GB/s; "
-        f"cpu best {record['cpu'].get('best_gbps')} GB/s"
+        f"gdn {record['gpu']['gdn_inproj_gbps']} GB/s"
     )
     print(
         f"  quality coverage {record['quality']['keyword_coverage']:.2f}, "

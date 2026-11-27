@@ -310,12 +310,7 @@ check_golden() {  # <install dir> <golden target>
       GOLDEN_SKIPPED="$GOLDEN_SKIPPED $2"
       return 0 ;;
   esac
-  if [ "${2%-cpu}" != "$2" ]; then
-    "$SCRIPT_DIR/golden-baseline.sh" --engine cpu --check "${2%-cpu}" \
-      || die "golden baseline mismatch ($2)"
-  else
-    "$SCRIPT_DIR/golden-baseline.sh" --check "$2" || die "golden baseline mismatch ($2)"
-  fi
+  "$SCRIPT_DIR/golden-baseline.sh" --check "$2" || die "golden baseline mismatch ($2)"
   GOLDENS_CHECKED=$((GOLDENS_CHECKED + 1))
 }
 # The canonical target names, not the bare `4`/`8` aliases golden-baseline.sh
@@ -470,7 +465,7 @@ LIB_ARCHIVE="$STAGE_ROOT/tinytitan-lib-$VERSION-macos-arm64.tar.gz"
 # Assert on the *archive*, not the staging directory: a dylib that failed to
 # stage is invisible until somebody links against the download.
 for member in libTinyTitanLib.a libTinyTitanLib.dylib TinyTitanLib.swiftmodule/ \
-  TinyTitanVariants.swiftmodule/ TinyTitanCPUEngine.swiftmodule/ \
+  TinyTitanVariants.swiftmodule/ \
   TinyTitanKernelsC.modulemap TinyTitan_TinyTitanCore.bundle/Contents/Resources/Metal/ \
   demo/main.swift demo/build-dynamic.sh; do
   tar tzf "$LIB_ARCHIVE" | grep -q "$member" \

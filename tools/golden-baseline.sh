@@ -7,8 +7,6 @@
 #   tools/golden-baseline.sh [target ...]     # default: ornith-4
 #   tools/golden-baseline.sh --check [...]    # compare against the stored file
 #   tools/golden-baseline.sh --server [...]   # CLI and server must agree
-#   tools/golden-baseline.sh --engine cpu ... # capture/compare the CPU path
-#                                             # (file suffix `-cpu`; dense only)
 #
 # Targets: ornith-4, inkling2-gguf-q4 and inkling2-nvfp4 — the shipped matrix
 # (TT-142). A target is inert until its install is present, and release.sh
@@ -169,16 +167,11 @@ export TINYTITAN_PREFILL_ANE=off
 
 mode=capture
 server_mode=0
-engine=""
 targets=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check)  mode=check; shift ;;
     --server) server_mode=1; shift ;;
-    --engine)
-      engine="${2:-}"
-      case "$engine" in cpu|gpu) ;; *) echo "unknown --engine: $engine (cpu|gpu)" >&2; exit 2 ;; esac
-      shift 2 ;;
     *)        targets+=("$1"); shift ;;
   esac
 done
@@ -381,7 +374,6 @@ for t in "${targets[@]+"${targets[@]}"}"; do
     status=1
     continue
   fi
-  if [ "$engine" = cpu ]; then file="${file%.txt}-cpu.txt"; fi
   file="$OUT_DIR/$file"
   work="$(mktemp "$ROOT/.build/golden-baseline.XXXXXX")"
 
@@ -395,11 +387,8 @@ for t in "${targets[@]+"${targets[@]}"}"; do
 
   # --quiet keeps the timing footer out of the compared text; only the
   # generated tokens are the contract. Timings vary run to run by design.
-  engine_args=()
-  [ -n "$engine" ] && engine_args=(--engine "$engine")
   "$CLI" --model "$model" --prompt "$PROMPT" --max-new "$MAX_NEW" \
-         --temperature 0 --seed "$SEED" --quiet \
-         "${engine_args[@]+"${engine_args[@]}"}" > "$work" 2>"$work.err"
+         --temperature 0 --seed "$SEED" --quiet > "$work" 2>"$work.err"
   rc=$?
   if [ $rc -ne 0 ]; then
     echo "  FAILED (exit $rc)"; sed 's/^/  /' "$work.err" | head -20
@@ -428,7 +417,7 @@ for t in "${targets[@]+"${targets[@]}"}"; do
       echo "# max-new:     $MAX_NEW"
       echo "# temperature: 0 (greedy)"
       echo "# seed:        $SEED"
-      echo "# target:      $t (${q}-bit${engine:+, $engine})"
+      echo "# target:      $t (${q}-bit)"
       echo "# captured-on: $(sysctl -n hw.model), $(( $(sysctl -n hw.memsize) / 1073741824 )) GB, macOS $(sw_vers -productVersion)"
       echo "# commit:      $(git -C "$ROOT" rev-parse --short HEAD)"
       echo "---"

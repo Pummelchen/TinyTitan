@@ -1,7 +1,6 @@
 import Foundation
 import NIOCore
 import Testing
-import TinyTitanCPUEngine
 
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
@@ -110,14 +109,9 @@ struct DynamicServingHTTPTests {
             let list = try object(data)
             #expect(list["object"] as? String == "list")
             let models = try #require(list["data"] as? [[String: Any]])
-            // The dense install is listed once with its alternative engine as
-            // a real choice; a single-engine install is listed bare.
             #expect(
                 models.compactMap { $0["id"] as? String }
-                    == [
-                        "alpha_4-Bit", "flash_8-Bit", "small-2b",
-                        RoutingFixture.dense.id, "\(RoutingFixture.dense.id)@cpu",
-                    ])
+                    == ["alpha_4-Bit", "flash_8-Bit", "small-2b"])
             #expect(models.allSatisfy { $0["object"] as? String == "model" })
             #expect(models.allSatisfy { $0["owned_by"] as? String == "tinytitan" })
         }
@@ -129,14 +123,11 @@ struct DynamicServingHTTPTests {
             let list = try object(data)
             #expect(list["has_more"] as? Bool == false)
             #expect(list["first_id"] as? String == "alpha_4-Bit")
-            #expect(list["last_id"] as? String == "\(RoutingFixture.dense.id)@cpu")
+            #expect(list["last_id"] as? String == "small-2b")
             let models = try #require(list["data"] as? [[String: Any]])
             #expect(
                 models.compactMap { $0["display_name"] as? String }
-                    == [
-                        "Alpha 35B", "Flash 125B", "Small 2B",
-                        "Dense 2B", "Dense 2B (CPU)",
-                    ])
+                    == ["Alpha 35B", "Flash 125B", "Small 2B"])
             #expect(models.allSatisfy { $0["type"] as? String == "model" })
             #expect(models.allSatisfy { $0["created_at"] is String })
             #expect(Set(models.flatMap(\.keys)) == ["type", "id", "display_name", "created_at"])
@@ -215,7 +206,7 @@ struct DynamicServingHTTPTests {
     @Test func omittedSamplingAndTheTokenBoundComeFromTheNamedModel() async throws {
         let log = RoutingEventLog()
         try await withRouter(log: log) { port, router in
-            // Alpha is resident; the CPU model's context is 32768.
+            // Alpha is resident; the capped model's context is 32768.
             let (_, tooLong) = try await send(
                 port, "POST", "/v1/chat/completions",
                 json: chat("small-2b", extra: #","max_tokens":40000"#))
@@ -239,7 +230,7 @@ struct DynamicServingHTTPTests {
             _ = try await send(port, "POST", "/v1/chat/completions", json: chat("small-2b"))
             let small = try #require(log.requests.last)
             #expect(small.generationConfig.temperature == 0.6)
-            #expect(small.maximumCompletionTokens == CPUModelBackend.contextCeiling)
+            #expect(small.maximumCompletionTokens == RoutingFixture.smallContext)
         }
     }
 
@@ -418,26 +409,25 @@ struct DynamicServingArgumentTests {
         }
     }
 
-    /// The CPU engine keeps its snapshot resident and cannot release it, so
-    /// these flags were accepted, printed in the ready banner, and ignored
-    /// (AUD-0068). They are refused instead.
-    @Test func cpuResidencyFlagsAreRefused() throws {
-        for flags in [["--lazy-load"], ["--idle-unload-seconds", "600"]] {
+    /// The CPU engine's flags are gone, not inert.
+    ///
+    /// `--cpu` and `--no-cpu-resident` named a route that no longer exists
+    /// (TT-142 slice (b)); an unknown flag is refused rather than accepted and
+    /// ignored. The GPU residency flags the engine really implements stay.
+    @Test func theCPUFlagsAreGone() throws {
+        for flag in [["--cpu"], ["--no-cpu-resident"], ["--cpu", "--no-cpu-resident"]] {
             #expect(throws: ServerArgumentError.self) {
-                try parse(["--model", "/m", "--cpu"] + flags)
+                try parse(["--model", "/m"] + flag)
             }
         }
-        // The GPU engine still accepts both, alone and together.
         #expect(try parse(["--model", "/m", "--lazy-load"]).managesResidency)
         #expect(
             try parse(["--model", "/m", "--idle-unload-seconds", "600"]).managesResidency)
-        // And the CPU engine still accepts its own resident switch.
-        #expect(try parse(["--model", "/m", "--cpu", "--no-cpu-resident"]).cpuResident == false)
     }
 
     @Test func singleModelFlagsAreRefusedWithACatalog() {
         for flags in [
-            ["--model-id", "x"], ["--cpu"], ["--mtp-model", "/d"], ["--idle-unload-seconds", "60"],
+            ["--model-id", "x"], ["--mtp-model", "/d"], ["--idle-unload-seconds", "60"],
         ] {
             #expect(throws: ServerArgumentError.self) {
                 try parse(["--models-dir", "/models", "--model", "a"] + flags)
@@ -488,26 +478,19 @@ struct DynamicServingArgumentTests {
                 requested: .multiPrefix, mtpEnabled: true, slots: 1) == .off)
     }
 
-    /// The routing banner states the initial model's cache mode, and that
-    /// depends on the engine as well as the width: a CPU entry has no cache to
-    /// turn on, so it reports off whatever the server was asked for, and a
-    /// raised width turns a GPU entry's session-wide cache off.
-    @Test func theInitialModelsPromptCacheFollowsItsEngineAndTheWidth() {
-        for slots in [1, 2, 4] {
-            #expect(
-                ServerModelSession.initialPromptCacheMode(
-                    backend: .cpu, requested: .multiPrefix,
-                    maxConcurrentSequences: slots) == .off)
-        }
+    /// The routing banner states the initial model's cache mode. The catalog
+    /// loader attaches no MTP, so the width is the whole rule: one sequence
+    /// keeps the session-wide cache, a raised width turns it off.
+    @Test func theInitialModelsPromptCacheFollowsTheWidth() {
         #expect(
             ServerModelSession.initialPromptCacheMode(
-                backend: .gpu, requested: .multiPrefix, maxConcurrentSequences: 1) == .multiPrefix)
+                requested: .multiPrefix, maxConcurrentSequences: 1) == .multiPrefix)
         #expect(
             ServerModelSession.initialPromptCacheMode(
-                backend: .gpu, requested: .multiPrefix, maxConcurrentSequences: 4) == .off)
+                requested: .multiPrefix, maxConcurrentSequences: 4) == .off)
         #expect(
             ServerModelSession.initialPromptCacheMode(
-                backend: .gpu, requested: .singlePrefix, maxConcurrentSequences: 2) == .off)
+                requested: .singlePrefix, maxConcurrentSequences: 2) == .off)
     }
 
     /// Every plan is built through `ModelSessionPlan.from`, which carries the

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "The one inventory of supported (model, quantization) pairs: the three installs the shipped matrix has, each served by its own TPP/1 plugin (TT-142, 2026-11-27). The engines for the other families a converter still knows (Qwen 3.6/3.8, KAT-Coder, AgentWorld, Ornith 122B/8-bit, Laguna) are not routes and are not listed here. `shipped` marks a variant with a captured `qualification` record: Ornith 1.5 35B-A3B 4-bit has one, and the two Inkling 2 Mini installs do not (their goldens are in benchmark/golden, and no benchmark record has been filed in this file). `target` names the SwiftPM engine target, and `unshippedTargets` lists the engine targets still in the tree with no supported install (the dense family, TT-142 slice (b)): every target there must exist and must not be registered as a variant, so the list cannot quietly hide a shipped engine.",
+  "note": "The one inventory of supported (model, quantization) pairs: the three installs the shipped matrix has, each served by its own TPP/1 plugin (TT-142, 2026-11-27). The engines for the other families a converter still knows (Qwen 3.6/3.8, KAT-Coder, AgentWorld, Ornith 122B/8-bit, Laguna) are not routes and are not listed here. `shipped` marks a variant with a captured `qualification` record: Ornith 1.5 35B-A3B 4-bit has one, and the two Inkling 2 Mini installs do not (their goldens are in benchmark/golden, and no benchmark record has been filed in this file). `target` names the SwiftPM engine target, and `unshippedTargets` lists engine targets in the tree with no supported install: it is empty since TT-142 slice (b) deleted the dense family (2026-11-28). A row there must exist and must not be registered as a variant, so the list cannot quietly hide a shipped engine.",
   "models": [
     {
       "modelID": "ornith-1.5-35b",
@@ -84,13 +84,5 @@
       ]
     }
   ],
-  "unshippedTargets": [
-    "DenseGPU",
-    "Qwen35Dense2B4Bit",
-    "Qwen35Dense2B8Bit",
-    "Qwen35Dense4B4Bit",
-    "Qwen35Dense4B8Bit",
-    "Qwen35Dense9B4Bit",
-    "Qwen35Dense9B8Bit"
-  ]
+  "unshippedTargets": []
 }

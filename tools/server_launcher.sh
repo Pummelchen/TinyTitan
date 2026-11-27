@@ -33,8 +33,7 @@
 #              explicit target; an unattended run passes nothing and the
 #              install's own measured profile applies, which the runtime holds to
 #              a third of physical memory (a third of the cache plus the resident
-#              weights is what the process then holds). The CPU engine has no
-#              expert cache, so it does not ask and the flag does not apply there.
+#              weights is what the process then holds).
 #
 # Flags (override the positional form, and work in any order):
 #
@@ -43,12 +42,6 @@
 #              which the coder benchmark reads too)
 #   --model <m>     model key or catalog id
 #   --bits <4|8>    quantization for a model key (every shipped row is 4-bit)
-#   --engine <cpu|gpu>  which engine serves the model. Every shipped install
-#              declares exactly one -- a MoE or Inkling family is GPU-only -- and
-#              asking for the other is refused with the reason. The catalog
-#              still carries the engine list per install, so an install both
-#              engines implement would be a real choice, asked interactively and
-#              named by an `@cpu`/`@gpu` suffix on the model id a request uses.
 #   --mode <fast|full>       fast strips CLI boilerplate; full keeps tools
 #   --answers <default|concise>
 #   --thinking <level>
@@ -80,8 +73,7 @@
 #              The prompt cache is off above 1, so follow-up turns re-read their
 #              whole prompt. The launcher asks, and warns in red, because this is
 #              the setting a person turns on once and then wonders why the Mac is
-#              swapping. GPU models only: the CPU engine runs one generation at a
-#              time whatever it is told.
+#              swapping.
 #   --memory        enable persistent agent memory for this project
 #   --install       download and convert a model that is not on disk yet without
 #              asking. The interactive menu lists the supported models this
@@ -133,10 +125,6 @@
 # is wired and cannot be paged out -- so this launcher warns above that line and
 # passes the size on as asked; the runtime separately holds the *profile's* own
 # cache value to a third of physical memory on the default (no-flag) path.
-# CPU models take none of the pinned flags: that backend has no prompt cache, no
-# quantized KV and no expert cache, so --kv, --context, --yarn and --ram are
-# reported as not applying rather than passed or dropped in silence.
-#
 # Overrides: TINYTITAN_PORT, TINYTITAN_THINKING_MODE, TINYTITAN_CATALOG_JSON,
 # TINYTITAN_PHYSICAL_RAM_BYTES (the RAM-ceiling test seam), TINYTITAN_MODELS_DIR (the
 # installs directory, models/ by default), TINYTITAN_LAUNCHER_DRY_RUN=1, and the
@@ -197,7 +185,7 @@ if [[ "$DRY_RUN" == "1" || ! -t 0 ]]; then INTERACTIVE=0; fi
 if [[ "${TINYTITAN_LAUNCHER_ASSUME_TTY:-0}" == "1" ]]; then INTERACTIVE=1; fi
 
 CLIENT=""; MODE=""; MODEL_ARG=""; BITS=""; ANSWERS=""; THINKING_ARG=""
-RAM_ARG=""; CONTEXT_ARG=""; KV_ARG=""; YARN=0; PORT_ARG=""; MEMORY=0; ENGINE_ARG=""
+RAM_ARG=""; CONTEXT_ARG=""; KV_ARG=""; YARN=0; PORT_ARG=""; MEMORY=0
 CACHE_ARG=""; MTP_MODEL_ARG=""; MTP_MEMORY_ARG=""; CONCURRENCY_ARG=""
 PROMPT_CACHE_DISK_ARG=""; PROMPT_CACHE_DISK_MIB_ARG=""; PROMPT_CACHE_DISK_OFF=0
 CALIBRATION_PROFILE=""
@@ -239,7 +227,6 @@ while [[ $# -gt 0 ]]; do
     --client)   CLIENT="${2:?--client needs a value}"; shift 2 ;;
     --model)    MODEL_ARG="${2:?--model needs a value}"; shift 2 ;;
     --bits)     BITS="${2:?--bits needs 4 or 8}"; shift 2 ;;
-    --engine)   ENGINE_ARG="${2:?--engine needs cpu or gpu}"; shift 2 ;;
     --mode)     MODE="${2:?--mode needs fast or full}"; shift 2 ;;
     --answers)  ANSWERS="${2:?--answers needs default or concise}"; shift 2 ;;
     --thinking) THINKING_ARG="${2:?--thinking needs a level}"; shift 2 ;;
@@ -593,19 +580,6 @@ if [[ -z "$MODEL_ARG" ]]; then
   else
     echo "Which model?"
   fi
-  # An install both engines can serve says so: `GPU+CPU`. One is the default
-  # and the other is a choice the next question offers.
-  engine_column() {
-    local list="$1"
-    if [[ "$list" == *,* ]]; then
-      # `tr` rather than `${list^^}`: the uppercase expansion is bash 4+, and
-      # /bin/bash is 3.2 on a factory Mac ("bad substitution", at runtime, in the
-      # middle of the model menu).
-      printf '%s' "$list" | tr '[:lower:]' '[:upper:]' | tr ',' '+'
-    else
-      [[ "$list" == cpu ]] && echo CPU || echo GPU
-    fi
-  }
   # Engine and thinking levels are the two things a person is choosing between
   # here, so both are in the list rather than discovered after the fact.
   printf "  %-3s %-28s %-6s %-4s %8s  %-22s %-24s %s\n" \
@@ -617,7 +591,7 @@ if [[ -z "$MODEL_ARG" ]]; then
     if (( i == default_idx )); then note="  (default)"; fi
     printf "  %2d) %-28s %s-bit  %-4s %8s  %-22s %-24s%s\n" "$((i + 1))" \
       "${TINYTITAN_CAT_NAME[$i]}" "${TINYTITAN_CAT_QUANT[$i]}" \
-      "$( engine_column "${TINYTITAN_CAT_ENGINES[$i]:-${TINYTITAN_CAT_BACKEND[$i]}}" )" \
+      GPU \
       "$size" "${TINYTITAN_CAT_ID[$i]}" "${TINYTITAN_CAT_THINKING[$i]//,/, }" "$note"
   done
   # What this checkout supports but does not have, as rows rather than a note:
@@ -643,7 +617,7 @@ if [[ -z "$MODEL_ARG" ]]; then
     [[ -n "$m_gb" ]] && size="$m_gb GB"
     printf "  %2d) %-28s %s-bit  %-4s %8s  %-22s %-24s%s\n" "$((first_missing + i))" \
       "$m_label" "$m_bits" \
-      "$( engine_column "${TINYTITAN_MODEL_ENGINES:-${TINYTITAN_MODEL_FAMILY:-}}" )" \
+      GPU \
       "$size" "not installed" "${TINYTITAN_MODEL_THINKING//,/, }" "  fetches it first"
   done
   if (( missing_count > 0 )); then
@@ -768,88 +742,20 @@ fi
 MODEL_ID="${TINYTITAN_CAT_ID[$idx]}"
 MODEL_NAME="${TINYTITAN_CAT_NAME[$idx]}"
 MODEL_QUANT="${TINYTITAN_CAT_QUANT[$idx]}"
-MODEL_BACKEND="${TINYTITAN_CAT_BACKEND[$idx]}"
 MODEL_DIR="${TINYTITAN_CAT_PATH[$idx]}"
 IFS=',' read -r -a levels <<< "${TINYTITAN_CAT_THINKING[$idx]}"
 
 # ============================================================
-# 3b) Engine: which engine serves this install, and what was asked for
+# 3b) Engine: every shipped install is a GPU plugin
 # ============================================================
 
-# The catalog says which engines can serve an install. Every shipped install has
-# exactly one -- a MoE or Inkling family is GPU-only because the CPU engine does
-# not implement those shapes -- and a catalog row that lists two is the case
-# where the engine is a real choice, so it asks.
-IFS=',' read -r -a engines <<< "${TINYTITAN_CAT_ENGINES[$idx]:-$MODEL_BACKEND}"
-default_engine="${TINYTITAN_CAT_BACKEND[$idx]}"
-engine_family="${TINYTITAN_CAT_FAMILY[$idx]:--}"
-engine_name() { if [[ "$1" == cpu ]]; then echo CPU; else echo GPU; fi; }
-engine_available() {
-  local candidate
-  for candidate in "${engines[@]+"${engines[@]}"}"; do [[ "$candidate" == "$1" ]] && return 0; done
-  return 1
-}
-engine_reason() {
-  if [[ "$1" == cpu ]]; then
-    echo "$MODEL_NAME ${MODEL_QUANT}-bit declares family $engine_family, which the GPU engine does not implement; it runs on the CPU engine"
-  else
-    echo "$MODEL_NAME ${MODEL_QUANT}-bit declares family $engine_family, which the CPU engine does not implement; it runs on the GPU engine"
-  fi
-}
-
-if [[ -n "$ENGINE_ARG" ]]; then
-  case "$ENGINE_ARG" in
-    cpu|gpu) ;;
-    *) echo "unknown --engine: $ENGINE_ARG (cpu|gpu)" >&2; exit 2 ;;
-  esac
-  if ! engine_available "$ENGINE_ARG"; then
-    echo "$(engine_reason "$default_engine")." >&2
-    echo "--engine $ENGINE_ARG is not available for it." >&2
-    exit 2
-  fi
-  ENGINE="$ENGINE_ARG"
-elif (( ${#engines[@]} > 1 )) && (( INTERACTIVE )); then
-  echo ""
-  echo "Which engine? $MODEL_NAME ${MODEL_QUANT}-bit runs on both."
-  default_choice=1
-  for (( i = 0; i < ${#engines[@]}; i++ )); do
-    note=""
-    if [[ "${engines[$i]}" == "$default_engine" ]]; then
-      default_choice=$((i + 1))
-      note="  (default)"
-    fi
-    printf "  %d) %s%s\n" "$((i + 1))" "$(engine_name "${engines[$i]}")" "$note"
-  done
-  printf "Choice [1-%d] (default %d): " "${#engines[@]}" "$default_choice"
-  read -r engine_choice || exit 1
-  engine_choice="${engine_choice:-$default_choice}"
-  if [[ "$engine_choice" =~ ^[0-9]+$ ]] \
-     && (( engine_choice >= 1 && engine_choice <= ${#engines[@]} )); then
-    ENGINE="${engines[$((engine_choice - 1))]}"
-  else
-    echo "invalid choice: $engine_choice" >&2; exit 2
-  fi
-else
-  ENGINE="$default_engine"
-fi
-
-# The engine is stated, and whether it was a choice. The list's engine column
-# shows the default; this says which one this run will use and why there is (or
-# is not) an alternative.
-if (( ${#engines[@]} > 1 )); then
-  engine_line="$(engine_name "$ENGINE") -- your choice of $(printf '%s' "${engines[*]+"${engines[*]}"}" | tr ' ' '/')"
-else
-  engine_line="$(engine_name "$ENGINE") only -- $(engine_reason "$ENGINE")"
-fi
-if (( INTERACTIVE )); then echo "Engine: $engine_line"; fi
-# The request names the engine with an `@cpu`/`@gpu` suffix when it is not the
-# install's default; the server registers those aliases from the same catalog
-# field, so the two cannot disagree about what is available.
+# The dense CPU engine and the second engine it gave the dense family left with
+# TT-142 slice (b) (2026-11-28). There is one engine to select now, so the
+# launcher states it rather than asking or accepting a flag that chooses
+# nothing.
 MODEL_ID_LAUNCH="$MODEL_ID"
-if [[ "$ENGINE" != "$default_engine" ]]; then
-  MODEL_ID_LAUNCH="${MODEL_ID}@${ENGINE}"
-fi
-MODEL_BACKEND="$ENGINE"
+engine_line="GPU only -- every shipped install is a plugin"
+if (( INTERACTIVE )); then echo "Engine: GPU"; fi
 
 # ============================================================
 # 4) Answers: standard or concise
@@ -1067,11 +973,7 @@ if [[ -n "$RAM_ARG" ]]; then
     echo "unknown RAM target: $RAM_ARG (minimum 4 GB; the resident weights plus a minimum expert cache are always more than that, so a smaller target cannot be honoured)" >&2
     exit 2
   fi
-  if [[ "$ENGINE" != "cpu" ]]; then warn_ram_over_rule; fi
-elif [[ "$ENGINE" == "cpu" ]]; then
-  # Nothing to ask: the CPU engine holds the whole model resident and has no
-  # routed-expert cache, so a budget would be a number that changes nothing.
-  ram_gb=""
+  warn_ram_over_rule
 elif (( ! INTERACTIVE )); then
   # Unattended or dry run: Inkling Q4 defaults to 14 GB (measured coding sweet
   # spot with 128K context and 8-bit KV on a 24 GB Mac) when the machine has at
@@ -1159,16 +1061,6 @@ if [[ -n "$ram_gb" ]]; then
   fi
 fi
 
-# A CPU model ignores the routed-expert cache entirely, so say what the number
-# does rather than leaving a budget that never takes effect.
-if [[ "$ENGINE" == "cpu" ]]; then
-  ram_note="not applicable (no routed-expert cache on the CPU engine)"
-  if [[ -n "$RAM_ARG" ]]; then
-    echo "NOTE: $MODEL_NAME runs on the CPU and has no routed-expert cache;" >&2
-    echo "      --ram $RAM_ARG does not apply to it." >&2
-  fi
-fi
-
 # ============================================================
 # 7) Advanced server features
 # ============================================================
@@ -1220,7 +1112,7 @@ elif [[ -n "$CONTEXT_ARG" ]]; then
     echo "unknown --context: $CONTEXT_ARG (a rung 4k..2m, native, or max)" >&2
     exit 2
   fi
-elif [[ "$ENGINE" != "cpu" ]] && (( INTERACTIVE )); then
+elif (( INTERACTIVE )); then
   echo ""
   echo "Context window?"
   echo "  1) 16K (16384)       2) 32K (32768)       3) 64K (65536)"
@@ -1259,7 +1151,7 @@ fi
 
 if [[ -n "$KV_ARG" ]]; then
   kv_bits="$KV_ARG"
-elif [[ "$ENGINE" != "cpu" ]] && (( INTERACTIVE )); then
+elif (( INTERACTIVE )); then
   echo ""
   echo "KV-cache precision?"
   echo "  1) 8-bit (default — best balance of RAM, speed and quality)"
@@ -1328,8 +1220,6 @@ warn_concurrency_if_many() {
 }
 
 concurrency=1
-# The flag is validated whether or not it can take effect, so a typo is refused
-# rather than silently swallowed on the CPU engine.
 if [[ -n "$CONCURRENCY_ARG" ]]; then
   if ! valid_concurrency "$CONCURRENCY_ARG"; then
     echo "unknown --concurrency: $CONCURRENCY_ARG (a power of two from 1 to $MAX_CONCURRENCY)" >&2
@@ -1338,14 +1228,7 @@ if [[ -n "$CONCURRENCY_ARG" ]]; then
   concurrency="$CONCURRENCY_ARG"
 fi
 
-if [[ "$ENGINE" == "cpu" ]]; then
-  # Nothing to ask and nothing to warn about: the CPU backend's actor runs a
-  # generation to completion before the next starts, so a width above one only
-  # widens the admission window. The flag is reported as not applying in the CPU
-  # block below, and the value that reaches the server is pinned to one, so the
-  # summary cannot advertise a width the server will not run.
-  concurrency=1
-elif (( INTERACTIVE )) && [[ -z "$CONCURRENCY_ARG" ]]; then
+if (( INTERACTIVE )) && [[ -z "$CONCURRENCY_ARG" ]]; then
   echo ""
   echo "How many generations should the server serve at once?"
   echo "  1 is the default and the fastest per answer: the whole GPU works on"
@@ -1419,23 +1302,6 @@ if (( PORT < 1024 )); then
 fi
 
 
-# The context, KV and YaRN flags reach the GPU runtime only. Asking for one of
-# them against a CPU model is a misunderstanding worth naming: the CPU engine
-# takes its context from the model's own config (clamped by the backend) and
-# has no quantized KV cache to pick a width for.
-if [[ "$ENGINE" == "cpu" ]]; then
-  inert_flags=()
-  [[ -n "$KV_ARG" ]] && inert_flags+=(--kv)
-  [[ -n "$CONTEXT_ARG" ]] && inert_flags+=(--context)
-  [[ -n "$CONCURRENCY_ARG" ]] && inert_flags+=(--concurrency)
-  (( YARN )) && inert_flags+=(--yarn)
-  if (( ${#inert_flags[@]} > 0 )); then
-    echo "NOTE: ${inert_flags[*]+"${inert_flags[*]}"} do not apply to the CPU engine; ignoring" >&2
-    echo "      ${inert_flags[*]+"${inert_flags[*]}"} for $MODEL_NAME." >&2
-  fi
-  kv_bits=""; max_context=""; rope_scaling="none"
-fi
-
 if [[ "$MEMORY" == "1" ]]; then
   export TINYTITAN_MEMORY=1
 fi
@@ -1469,16 +1335,12 @@ if [[ -n "$max_context" ]]; then
 elif [[ "$rope_scaling" == "none" ]]; then
   gpu_runtime+=(--max-context 262144 --rope-scaling none)
 fi
-if [[ -n "$ram_gb" && "$MODEL_BACKEND" != "cpu" ]]; then
+if [[ -n "$ram_gb" ]]; then
   gpu_runtime+=(--ram-budget "${ram_gb}G")
 fi
-# The draft head shares the target's embedding and head on the GPU path, so it
-# attaches there only; the CPU engine has no speculative path to attach to.
+# The draft head shares the target's embedding and head, so it attaches to the
+# target's install.
 if [[ -n "$MTP_MODEL_ARG" ]]; then
-  if [[ "$MODEL_BACKEND" == "cpu" ]]; then
-    echo "ERROR: --mtp-model does not apply to the CPU engine (no speculative path)" >&2
-    exit 2
-  fi
   if [[ ! -f "$MTP_MODEL_ARG/manifest.json" ]]; then
     echo "ERROR: MTP draft head not found at $MTP_MODEL_ARG" >&2
     exit 2
@@ -1492,44 +1354,30 @@ else
   server_cmd=("$BINARY" --model "$MODEL_DIR" --port "$PORT" --thinking "$( [[ "$thinking_level" == off ]] && echo off || echo on )")
 fi
 # The server validates the profile against this machine, context and model and
-# fills only the knobs no explicit flag set, so it is forwarded unchanged for
-# both engines; the log names what was applied and what had no switch.
+# fills only the knobs no explicit flag set; the log names what was applied and
+# what had no switch.
 if [[ -n "$CALIBRATION_PROFILE" ]]; then
   server_cmd+=(--calibration-profile "$CALIBRATION_PROFILE")
 fi
 
-if [[ "$MODEL_BACKEND" == "cpu" ]]; then
-  if (( dynamic )); then
-    # The catalog knows which engine each model uses; --cpu is refused here.
-    runtime_note="CPU backend | no prompt cache | context clamped by the backend | sampling from the model"
-  else
-    server_cmd+=(--cpu)
-    runtime_note="CPU backend | no prompt cache | context clamped by the backend | sampling from the model"
-  fi
-  # Pin the single-generation width the CPU engine runs at anyway, so the
-  # server's admission window matches what this launcher just told the operator.
-  server_cmd+=(--max-concurrent-sequences 1)
-  runtime_note="$runtime_note | one generation at a time"
+server_cmd+=("${gpu_runtime[@]+"${gpu_runtime[@]}"}" --max-concurrent-sequences "$concurrency")
+mtp_note="off"
+[[ -n "$MTP_MODEL_ARG" ]] && mtp_note="on (draft head)"
+# The cache mode in force, not the one asked for: above one slot the server
+# switches the session-wide cache off, and a summary that said "multi-prefix"
+# while the server ran `prompt_cache=off` would be a misreport.
+cache_note="$prompt_cache_mode"
+if (( concurrency > 1 )); then cache_note="off (above 1 at once)"; fi
+runtime_note="context ${max_context:-262144} | KV ${kv_bits}-bit | cache ${cache_note} | MTP ${mtp_note}"
+if (( concurrency > 1 )); then
+  runtime_note="$runtime_note | ${concurrency} at once (yours)"
 else
-  server_cmd+=("${gpu_runtime[@]+"${gpu_runtime[@]}"}" --max-concurrent-sequences "$concurrency")
-  mtp_note="off"
-  [[ -n "$MTP_MODEL_ARG" ]] && mtp_note="on (draft head)"
-  # The cache mode in force, not the one asked for: above one slot the server
-  # switches the session-wide cache off, and a summary that said "multi-prefix"
-  # while the server ran `prompt_cache=off` would be a misreport.
-  cache_note="$prompt_cache_mode"
-  if (( concurrency > 1 )); then cache_note="off (above 1 at once)"; fi
-  runtime_note="context ${max_context:-262144} | KV ${kv_bits}-bit | cache ${cache_note} | MTP ${mtp_note}"
-  if (( concurrency > 1 )); then
-    runtime_note="$runtime_note | ${concurrency} at once (yours)"
-  else
-    runtime_note="$runtime_note | one generation at a time"
-  fi
-  if [[ -n "$ram_gb" ]]; then
-    runtime_note="$runtime_note | RAM target ${ram_gb} GB (yours)"
-  else
-    runtime_note="$runtime_note | expert cache, prefetch, sampling from the model profile"
-  fi
+  runtime_note="$runtime_note | one generation at a time"
+fi
+if [[ -n "$ram_gb" ]]; then
+  runtime_note="$runtime_note | RAM target ${ram_gb} GB (yours)"
+else
+  runtime_note="$runtime_note | expert cache, prefetch, sampling from the model profile"
 fi
 
 # The base API id is what the catalog calls the install (it ends in the
@@ -1560,7 +1408,7 @@ api_model_note=""
 print_setup() {
   echo ""
   echo "============================================================"
-  echo " TinyTitanServer ready — $MODEL_NAME ${MODEL_QUANT}-bit ($( [[ "$MODEL_BACKEND" == cpu ]] && echo CPU || echo GPU ))"
+  echo " TinyTitanServer ready — $MODEL_NAME ${MODEL_QUANT}-bit (GPU)"
   echo "                                            answers ${mode_word}, thinking ${think_word}"
   echo "============================================================"
   echo ""

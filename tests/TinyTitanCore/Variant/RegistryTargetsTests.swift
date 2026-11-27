@@ -96,23 +96,28 @@ struct RegistryTargetsTests {
                 ]))
     }
 
-    @Test func theUnshippedTargetsExistAndAreNotRegistered() throws {
-        // `unshippedTargets` is how the dense engines stay in the tree without a
-        // supported install (TT-142 slice (b)). A row that points at nothing, or
-        // that is also a registered variant, would be the exclusion hiding a
-        // shipped engine.
+    @Test func noEngineTargetIsLeftOutsideTheRegistry() throws {
+        // `unshippedTargets` is how an engine target stays in the tree without a
+        // supported install; it was how the dense family was carried. TT-142
+        // slice (b) deleted that family (2026-11-28), so the list is empty, and
+        // the engine directories are exactly the registered targets: a leftover
+        // engine has to be registered or removed, not hidden.
         let registry = try Self.registry()
         let unshipped = try #require(registry["unshippedTargets"] as? [String])
+        #expect(
+            unshipped.isEmpty,
+            "the dense family left the tree; an engine with no shipped install must be deleted, not excluded"
+        )
         let registered = Set(try Self.variants().compactMap { $0["target"] as? String })
-        #expect(!unshipped.isEmpty)
-        for target in unshipped {
-            var isDirectory: ObjCBool = false
-            #expect(
-                FileManager.default.fileExists(
-                    atPath: Self.engineDirectory(target).path, isDirectory: &isDirectory)
-                    && isDirectory.boolValue,
-                "unshipped target \(target) is not a directory under sources/Engines")
-            #expect(!registered.contains(target), "unshipped target \(target) is also registered")
-        }
+        let root = Self.engineDirectory("Ornith35B4Bit").deletingLastPathComponent()
+        let directories = Set(
+            (try FileManager.default.contentsOfDirectory(atPath: root.path))
+                .filter { name in
+                    var isDirectory: ObjCBool = false
+                    return FileManager.default.fileExists(
+                        atPath: root.appendingPathComponent(name).path,
+                        isDirectory: &isDirectory) && isDirectory.boolValue
+                })
+        #expect(directories == registered)
     }
 }

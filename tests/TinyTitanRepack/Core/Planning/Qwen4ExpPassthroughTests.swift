@@ -43,7 +43,7 @@ struct Qwen4ExpPassthroughTests {
     @Test("The verifier's per-file cap admits every declared passthrough cap")
     func verifierCapAdmitsEveryPassthroughFile() {
         let families: [RepackModelFamily] = [
-            .qwen35Dense, .qwen36, .qwen36MTP, .qwen38flash, .qwen38flashMTP,
+            .qwen36, .qwen36MTP, .qwen38flash, .qwen38flashMTP,
             .qwen4flash, .qwen4flashMTP,
         ]
         for family in families {

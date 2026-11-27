@@ -39,8 +39,6 @@ QUIET_ANSWERS = (
     "off",
     "--ram",
     "9",
-    "--engine",
-    "gpu",
     "--context",
     "262144",
     "--kv",

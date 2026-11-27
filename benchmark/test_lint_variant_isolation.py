@@ -49,15 +49,15 @@ class VariantIsolationHarness(unittest.TestCase):
 
 class VariantIsolationTests(VariantIsolationHarness):
     def test_cross_variant_import_is_refused_and_named(self):
-        self.variant_file("Qwen35Dense2B4Bit", "import Foundation\nimport Qwen38Flash4Bit\n")
+        self.variant_file("Ornith35B4Bit", "import Foundation\nimport Qwen38Flash4Bit\n")
         self.variant_file("Qwen38Flash4Bit", "import Foundation\n")
         rc, out = self.run_mode("variant-isolation")
         self.assertNotEqual(rc, 0, f"variant-isolation passed a cross-variant import:\n{out}")
-        self.assertIn("Qwen35Dense2B4Bit", out)
+        self.assertIn("Ornith35B4Bit", out)
         self.assertIn("Qwen38Flash4Bit", out)
 
     def test_runtime_import_is_refused(self):
-        self.variant_file("Qwen35Dense2B4Bit", "import Foundation\nimport TinyTitan\n")
+        self.variant_file("Ornith35B4Bit", "import Foundation\nimport TinyTitan\n")
         rc, out = self.run_mode("variant-isolation")
         self.assertNotEqual(rc, 0, f"variant-isolation passed a runtime import:\n{out}")
         self.assertIn("TinyTitan", out)
@@ -80,7 +80,7 @@ class VariantIsolationTests(VariantIsolationHarness):
 
     def test_clean_variant_passes(self):
         self.variant_file(
-            "Qwen35Dense2B4Bit",
+            "Ornith35B4Bit",
             "import Foundation\nimport Metal\nimport TinyTitanCore\nimport TinyTitanFormat\n",
         )
         rc, out = self.run_mode("variant-isolation")

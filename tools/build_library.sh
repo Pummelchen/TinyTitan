@@ -197,11 +197,8 @@ Contents
   TinyTitanLib.swiftmodule   the Swift module — plus every module it imports,
                              because a binary module does not stand alone
   TinyTitanVariants.swiftmodule
-                             the 7.0 engine-factory surface (variant selection,
-                             variant factories, dense CPU selection)
-  TinyTitanCPUEngine.swiftmodule
-                             the dense CPU backend and its public CPUEngine
-                             facade
+                             the engine-factory surface (plugin registry,
+                             variant selection and factories)
   *.modulemap                the generated module maps for the C targets in the
                              graph (the kernels, yyjson, NIO's shims, ...),
                              which SwiftPM normally passes one by one

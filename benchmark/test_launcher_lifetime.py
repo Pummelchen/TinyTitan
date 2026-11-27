@@ -195,8 +195,6 @@ class LauncherServerProcessTests(unittest.TestCase):
                 "off",
                 "--ram",
                 "4",
-                "--engine",
-                "gpu",
                 "--concurrency",
                 "1",
                 "--port",

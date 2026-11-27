@@ -1,6 +1,5 @@
 import Foundation
 import Testing
-import TinyTitanCPUEngine
 
 @testable import TinyTitanLib
 @testable import TinyTitanServerCore
@@ -171,16 +170,14 @@ struct ModelRouterTests {
         // The two-row card advertises both rows: instruct base, thinking twin.
         #expect(flash.sampling.temperature == 0.7)
         #expect(flash.sampling.thinking?.temperature == 1.0)
-        // The CPU engine's own ceiling, not the checkpoint's 262k claim.
-        #expect(small.maximumContext == CPUModelBackend.contextCeiling)
+        // The install's own declared cap, not the server's wider window.
+        #expect(small.maximumContext == Fixture.smallContext)
         #expect(small.displayName == "Small 2B")
         #expect(router.servedModel(named: "small-2b-fast")?.id == Fixture.small.id)
         #expect(router.servedModel(named: "nothing-fast") == nil)
         #expect(
             router.servedModels.map(\.id) == [
-                Fixture.alpha.id, Fixture.flash.id,
-                Fixture.small.id, Fixture.dense.id,
-                "\(Fixture.dense.id)@cpu",
+                Fixture.alpha.id, Fixture.flash.id, Fixture.small.id,
             ])
     }
 
@@ -201,39 +198,27 @@ struct ModelRouterTests {
         #expect(choice.effort == .xhigh)
     }
 
-    /// A request names the engine for an install both engines serve.
+    /// An engine suffix is not a model id any more.
     ///
-    /// The dense Qwen 3.5 installs are the one shape with two engines, so the
-    /// router registers `@gpu` (the default, beside the bare id) and `@cpu`
-    /// beside each of them; naming one switches engines the same way naming a
-    /// different model does.
-    @Test func aRequestCanNameTheEngineOnADenseInstall() async throws {
+    /// `<id>@cpu` / `<id>@gpu` existed because the dense Qwen 3.5 installs were
+    /// the one shape both engines served. The CPU engine left with TT-142
+    /// slice (b), so every served install has one engine and the suffix is an
+    /// unknown model rather than a second spelling.
+    @Test func anEngineSuffixIsNotAModelID() async throws {
         let log = RoutingEventLog()
         let router = try Fixture.router(log: log)
         try await router.preload()
-        #expect(await router.residentModelID == Fixture.alpha.id)
-        #expect(
-            router.servedModel(named: "\(Fixture.dense.id)@gpu")?.id == "\(Fixture.dense.id)@gpu")
-        #expect(
-            router.servedModel(named: "\(Fixture.dense.id)@cpu")?.id == "\(Fixture.dense.id)@cpu")
-
-        let cpu = try await router.generate(Fixture.request("\(Fixture.dense.id)@cpu")) { _ in }
-        #expect(cpu.content == "\(Fixture.dense.id)@cpu")
-        #expect(await router.residentModelID == "\(Fixture.dense.id)@cpu")
-        #expect(log.loads.last == "load \(Fixture.dense.id)@cpu")
-
-        // The explicit GPU spelling resolves to the same install, not a second
-        // copy of it.
-        let gpu = try await router.generate(Fixture.request("\(Fixture.dense.id)@gpu")) { _ in }
-        #expect(gpu.content == "\(Fixture.dense.id)@gpu")
-        #expect(await router.residentModelID == "\(Fixture.dense.id)@gpu")
-
-        // An install with one engine has no alias, and asking for the other
-        // engine is an unknown model rather than a silent wrong-engine load.
-        await #expect(throws: ServerRequestError.self) {
-            _ = try await router.generate(Fixture.request("\(Fixture.alpha.id)@cpu")) { _ in }
+        for suffix in ["@gpu", "@cpu"] {
+            #expect(router.servedModel(named: "\(Fixture.alpha.id)\(suffix)") == nil)
+            await #expect(throws: ServerRequestError.self) {
+                _ = try await router.generate(
+                    Fixture.request("\(Fixture.alpha.id)\(suffix)")
+                ) { _ in }
+            }
         }
+        #expect(log.loads == ["load alpha_4-Bit"])
     }
+
     /// Every queued caller has to be released by the wake that took the gate from
     /// it, and every abandoned one by its cancellation. This is the AUD-143
     /// regression: the waiter array was appended to from the continuation closure,
@@ -322,7 +307,7 @@ struct ReasoningFallbackTests {
         #expect(
             ModelCatalog.Kind.gpu(family: "qwen36", reasoning: .binaryThinking).levelWhenOn == .on)
         #expect(
-            ModelCatalog.Kind.cpu(family: "qwen3_5_dense", reasoning: .binaryThinking).levelWhenOn
+            ModelCatalog.Kind.gpu(family: "qwen36", reasoning: .binaryThinking).levelWhenOn
                 == .on)
     }
 
@@ -355,11 +340,11 @@ struct ReasoningFallbackTests {
                     defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])), requested: .on)
         #expect(flash.thinking == .on)
         #expect(flash.effort == .xhigh)
-        let cpu = try ReasoningFallback.choice(
-            for: .cpu(family: "qwen3_5_dense", reasoning: .binaryThinking), requested: .high)
-        #expect(cpu.effective == .on)
-        #expect(cpu.thinking == .on)
-        #expect(cpu.effort == nil)
+        let binary = try ReasoningFallback.choice(
+            for: .gpu(family: "qwen36", reasoning: .binaryThinking), requested: .high)
+        #expect(binary.effective == .on)
+        #expect(binary.thinking == .on)
+        #expect(binary.effort == nil)
         let off = try ReasoningFallback.choice(
             for: .gpu(family: "qwen36", reasoning: .binaryThinking), requested: .off)
         #expect(off.thinking == .off)

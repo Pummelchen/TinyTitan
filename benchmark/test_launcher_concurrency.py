@@ -6,8 +6,7 @@ hold *while it works* -- each running sequence keeps its own KV cache, one GPU i
 shared between them, and the prompt cache is switched off above one. So the
 launcher asks for it, defaults it to one, and warns in red above one. These tests
 pin the default, the choice, the refusal, the warning (including that it is
-really red on a terminal), the cache report, and the CPU engine's one-generation
-rule.
+really red on a terminal) and the cache report.
 
 The model they are asked to start comes from `launcher_fixture`, so these run on a
 checkout with no install and no built server.
@@ -34,9 +33,6 @@ LAUNCHER = ROOT / "tools/server_launcher.sh"
 # Flags that answer every other question, so the concurrency question is the only
 # prompt left. `--ram 4` is the smallest target the launcher accepts (1 and 2 GB
 # cannot be honoured: the weights plus the minimum expert cache are ~4.7 GB).
-# `--engine gpu` goes with the gpu-backed row these classes ask about: a dense
-# row refuses that engine, and the CPU arm names one explicitly.
-#
 # The machine's physical memory is pinned through the launcher's own seam at
 # 16 GB, because the host must not decide what these tests read. On the 7 GB
 # CI runner the fixture model plus `--ram 4` cross that machine's 3 GB
@@ -52,8 +48,6 @@ QUIET_ANSWERS = (
     "off",
     "--ram",
     "4",
-    "--engine",
-    "gpu",
     "--context",
     "262144",
     "--kv",
@@ -208,30 +202,15 @@ class ConcurrencyChoiceTests(unittest.TestCase):
         self.assertEqual(run.returncode, 1, run.stdout)
         self.assertIn("--concurrency needs a power of two", run.stderr)
 
-    def test_a_cpu_model_is_pinned_to_one_generation(self) -> None:
-        # The CPU backend's actor runs a generation to completion before the
-        # next starts, so a width above one buys nothing there. The launcher
-        # says so and pins the server to one rather than pretending. No shipped
-        # install is CPU-served, so this names the fixture's synthetic dense row
-        # (the CPU backend still implements the family) instead of the
-        # gpu-backed base.
-        run = run_launcher(
-            self.installs,
-            "--client",
-            "server",
-            "--model",
-            self.installs.cpu_served(),
-            "--engine",
-            "cpu",
-            "--concurrency",
-            "4",
-        )
-        self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertIn("--concurrency", run.stderr)
-        self.assertIn("do not apply to the CPU engine", run.stderr)
-        self.assertIn("--max-concurrent-sequences 1", run.stdout)
-        self.assertNotIn("--max-concurrent-sequences 4", run.stdout)
-        self.assertNotIn("WARNING: the server will serve", run.stderr)
+    def test_the_engine_flag_is_gone(self) -> None:
+        # The CPU engine's concurrency rule (one generation, pinned) lost its
+        # subject with the dense engines (TT-142 slice (b)), and the flag that
+        # selected that engine is gone too: `--engine gpu` selects nothing now,
+        # so the launcher refuses it as an unknown option rather than accepting
+        # a spelling with no effect.
+        run = run_launcher(self.installs, *self.base, "--engine", "gpu")
+        self.assertNotEqual(run.returncode, 0, run.stdout)
+        self.assertIn("unknown option: --engine", run.stderr)
 
 
 class ConcurrencyQuestionTests(unittest.TestCase):

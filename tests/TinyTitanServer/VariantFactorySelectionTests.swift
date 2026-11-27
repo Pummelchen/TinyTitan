@@ -117,37 +117,18 @@ import Ornith35B4Bit
                 routedExpertWeightBits: 4)
         }
 
-        // The dense family routes to the shared dense-GPU engine, whose
-        // engine stage names itself (Task 13's flip).
-        let dense = try EngineFactories.gpuFactory(
-            family: "qwen3_5_dense", manifestModelID: "qwen3.5-4b",
-            routedExpertWeightBits: 4)
-        #expect(
-            engineStageError(dense).contains("dense Qwen 3.5 engine"),
-            "the dense identity must dispatch to the dense-GPU factory")
-    }
-
-    @Test("the selection table pins every dense identity to the dense-GPU engine")
-    func denseIdentitiesSelectTheDenseEngine() {
-        // Bare and width-suffixed dense installs, both quants — the three
-        // widths the registry ships rows for.
-        for (modelID, bits) in [
-            ("qwen3.5-2b", 4), ("qwen3.5-2b", 8),
-            ("qwen3.5-4b", 4), ("qwen3.5-4b", 8),
-            ("qwen3.5-9b", 4), ("qwen3.5-9b", 8),
-        ] {
-            #expect(
-                EngineFactories.gpuSelection(
-                    family: "qwen3_5_dense", manifestModelID: modelID,
-                    routedExpertWeightBits: bits) == .qwen35DenseGPU,
-                "\(modelID) at \(bits)-bit must select the dense-GPU engine")
-        }
-        // A dense install is dense whatever width the manifest declares —
-        // the selection is by family, not by width.
+        // A family that used to have a dense engine is refused by name now:
+        // no install no plugin claims is handed to a fallback (TT-142 slice
+        // (b) deleted the dense family, 2026-11-28).
         #expect(
             EngineFactories.gpuSelection(
-                family: "qwen3_5_dense", manifestModelID: "qwen3.5-9b",
-                routedExpertWeightBits: 8) == .qwen35DenseGPU)
+                family: "qwen3_5_dense", manifestModelID: "qwen3.5-4b",
+                routedExpertWeightBits: 4) == nil)
+        #expect(throws: EngineFactoryError.self) {
+            _ = try EngineFactories.gpuFactory(
+                family: "qwen3_5_dense", manifestModelID: "qwen3.5-4b",
+                routedExpertWeightBits: 4)
+        }
     }
 
     @Test("the single-model directory dispatch reads the install identity")
@@ -200,34 +181,4 @@ import Ornith35B4Bit
         }
     }
 
-    @Test("the dense CPU variant is selected per install size and width")
-    func denseCPUFactorySelection() throws {
-        // Hidden size names the model (2B 2048 / 4B 2560 / 9B 4096); the
-        // width its quant twin. Each combination is its own dedicated target.
-        #expect(
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 2_048, weightBits: 4)
-                == .qwen35Dense2B4Bit)
-        #expect(
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 2_048, weightBits: 8)
-                == .qwen35Dense2B8Bit)
-        #expect(
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 2_560, weightBits: 4)
-                == .qwen35Dense4B4Bit)
-        #expect(
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 2_560, weightBits: 8)
-                == .qwen35Dense4B8Bit)
-        #expect(
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 4_096, weightBits: 4)
-                == .qwen35Dense9B4Bit)
-        #expect(
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 4_096, weightBits: 8)
-                == .qwen35Dense9B8Bit)
-        // An unknown combination is refused by name, not served by a sibling.
-        #expect(throws: (any Error).self) {
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 2_560, weightBits: 6)
-        }
-        #expect(throws: (any Error).self) {
-            try EngineFactories.variantCPUEngineSelection(hiddenSize: 3_072, weightBits: 4)
-        }
-    }
 }

@@ -48,6 +48,9 @@ struct PluginRegistryConformanceTests {
                 params.concurrentSequences.accepts(1) && params.concurrentSequences.accepts(2),
                 Comment(rawValue: "\(plugin.pluginID) must support --max-concurrent-sequences"))
         }
-        #expect(checked >= 4)
+        // The shipped matrix: Ornith 1.5 4-bit and the two Inkling 2 Mini
+        // installs. A plugin that stops being listed is a deliberate removal,
+        // not a count that may drift down.
+        #expect(checked == 3)
     }
 }
