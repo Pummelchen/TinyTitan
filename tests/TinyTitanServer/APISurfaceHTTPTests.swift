@@ -633,11 +633,26 @@ struct AnthropicMessagesHTTPTests {
             let (one, oneStatus) = try await call(
                 port, "GET", "/v1/models/test-model", headers: version)
             #expect(oneStatus.statusCode == 200)
-            #expect(try json(one)["display_name"] as? String == "test-model")
+            let anthropicModel = try json(one)
+            #expect(anthropicModel["display_name"] as? String == "test-model")
+            #expect(anthropicModel["type"] as? String == "model")
+            #expect(anthropicModel["id"] as? String == "test-model")
 
-            // Without the header the same path keeps its OpenAI shape.
-            let (openAI, _) = try await call(port, "GET", "/v1/models")
+            // Without the header the same path keeps its OpenAI shape, and
+            // that shape is a model object: OpenAI defines
+            // `object: "model"` for this route, and a typed client decodes
+            // one. Answering with the collection's list here is the AUD-0070
+            // defect, so the object and its id are both asserted.
+            let (openAI, openAIStatus) = try await call(port, "GET", "/v1/models")
+            #expect(openAIStatus.statusCode == 200)
             #expect(try json(openAI)["object"] as? String == "list")
+            let (openAIModel, openAIModelStatus) = try await call(
+                port, "GET", "/v1/models/test-model")
+            #expect(openAIModelStatus.statusCode == 200)
+            let model = try json(openAIModel)
+            #expect(model["object"] as? String == "model")
+            #expect(model["id"] as? String == "test-model")
+            #expect(model["owned_by"] as? String == "tinytitan")
         }
     }
 
