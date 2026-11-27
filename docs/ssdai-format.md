@@ -6,8 +6,11 @@ first written. It did not exist. This is it.
 A `.ssdai` install is a directory. It is the only install shape this project
 ships: the runtime, the installer and `--verify-install` all
 assume it. The dense Qwen 3.5 2B/4B/9B installs used to be the exception — an
-affine safetensors snapshot with no manifest and no receipt — and they are
-`.ssdai` now too (`tools/repack_dense.sh`).
+affine safetensors snapshot with no manifest and no receipt — and they became
+`.ssdai` too, through the dense repack runbook `tools/repack_dense.sh` (removed
+with TT-142 on 2026-11-27, because no dense install is in the shipped matrix).
+The format statement stands: an affine snapshot is an install only once it is
+`.ssdai`.
 
 ```
 qwen3.5_2B_4Bit/
@@ -449,8 +452,7 @@ verification exact:
 
 The second is the one that matters. The first proves the bytes are right, which
 a wrong per-tensor width would still pass — the bytes are right, they are just
-read at the wrong width. `tools/repack_dense.sh` runs both, in that order, then
-`--verify-install`.
+read at the wrong width. Run both, in that order, then `--verify-install`.
 
 ## Building one
 
@@ -463,5 +465,5 @@ editing it forges the attestation instead of re-establishing it.
 
 Because the receipt is path-bound, an install must be written to where it will
 live. Repacking into a temporary directory and moving it into place produces an
-install whose receipt is invalid — `tools/repack_dense.sh` repacks straight into
-`models/` for this reason.
+install whose receipt is invalid — a repack goes straight into `models/` for
+this reason.
