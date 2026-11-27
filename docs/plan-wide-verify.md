@@ -1,5 +1,11 @@
 # Wide verify with prompt-copied drafts: Qwen3.8 decode on the 24 GB M3
 
+> **Superseded 2026-11-27.** MTP drafting is dropped: it does not work over
+> SSD-streamed experts, because the verify passes pay for weights that are not
+> resident (the gate failed by 43 points, byte-identical output —
+> `docs/qwen38-mtp-and-overlap-verdict.md`). Kept as the record of what was
+> measured; no further work on this plan.
+
 Status: **byte identity reached** (2026-11-12, probe run 10). In decode-order
 mode every row of a W=8 verify pass equals scalar decode exactly -- all 48
 layers, every stage dump, and the logits (max |d| 0). Gate 2 passed earlier on

@@ -105,3 +105,27 @@ precision/expert dropping (excluded by the quality and RAM rules).
 - **Overlap**: the exposed wait is device time for bytes that cannot be known
   earlier, and the device is saturated while it works. Further gain needs a faster
   device or a better predictor, not more engine parallelism.
+
+## Decision, 2026-11-27 — MTP is dropped
+
+MTP drafting is withdrawn from the product, not deferred. The reason is the
+engine's own design: routed experts are streamed from SSD, so a speculative
+verify pass reads weights that are not resident, and a width-_W_ pass costs more
+than the _≤ W_ tokens it accepts can save. That matches what the gate above
+measured — 43 points short with byte-identical output — and it is structural,
+not a tuning gap: no cheaper verify path can make a streamed weight read free.
+
+What this closes:
+
+- `TT-085` (MTP sidecars as variants) and `TT-061` (wide verify for Qwen3.8) are
+  dropped from the tracker, not left blocked; 7.0 spec phase 7 is withdrawn and
+  `docs/plan-wide-verify.md` is marked superseded.
+- The Qwen/Ornith sidecar installers were already removed (TT-092); Inkling's
+  bundled head remains in its plugin as an opt-in that defaults off.
+
+What remains in the tree, and is now unused-code scope rather than a plan: the
+`--mtp-model` server flag and its plumbing (`SessionBuildOptions.mtpModelDirectory`,
+`EngineFactories` sidecar resolution), `StreamingMTP` / wide-verify in the
+runtime, `InklingMTP*` and the per-engine MTP kernels. Nothing is deleted here:
+removal is a separate change that must keep the shipped Inkling route loading
+and the full suite green.

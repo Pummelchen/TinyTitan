@@ -335,7 +335,7 @@ time, with a gate at each step:
 | 4 | Ornith 35B 4/8, Qwen 3.6 4/8, KAT, AgentWorld (copy the 35B graph) | parity, then delete the 35B family switch |
 | 5 | Qwen 3.8 125B 4/8 (HC/PLE/QSA inside its variants) | parity |
 | 6 | Ornith 122B 4/8 (3072/48, dedicated tile per variant) | parity + new qualification |
-| 7 | MTP sidecars as variants of their own (no shared target kwargs) | acceptance rate parity |
+| 7 | ~~MTP sidecars as variants of their own~~ — withdrawn 2026-11-27, see the MTP verdict | — |
 | 8 | K2 own runner or drop it from the shipped matrix | graph exists or install-only removed |
 | 9 | Delete the family enum switches, `ModelProfile` table, Python tools | `rg` finds no model names in core |
 
@@ -436,6 +436,14 @@ at both 4-bit and 8-bit. No separate Qwen 4.0 checkpoint exists in this tree.
 Draft heads (MTP) are not independent LLMs and are not rows above: Qwen 3.6,
 Ornith 1.5 35B and Qwen3.8-Flash-Next each ship a 4-bit draft sidecar, and the
 122B checkpoint carries a draft that is not yet ported.
+
+**Withdrawn 2026-11-27.** MTP drafting is out of the 7.0 target. The engine
+streams routed experts from SSD, and speculation needs the draft head *plus*
+extra verify passes over weights that were not resident; the extra passes cost
+more than the accepted tokens save. The measured failure is recorded in
+`docs/qwen38-mtp-and-overlap-verdict.md` (43 points short of its own gate with
+byte-identical output). Phase 7 is withdrawn with it, and the per-family sidecar
+installers were already removed (TT-092).
 
 The 7.0 target is one variant per row and width: two for every "Shipped" or
 "Installed" row, two for the 122B, two for K2 when a K2 runner exists, and no
