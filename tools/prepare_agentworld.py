@@ -1065,10 +1065,26 @@ class OutputWriter:
             final[old_key] = f"model-{n:05d}-of-{self.shard_no:05d}.safetensors"
         for n in range(1, self.shard_no + 1):
             src = self.out / f"model-{n:05d}.safetensors"
-            src.rename(self.out / f"model-{n:05d}-of-{self.shard_no:05d}.safetensors")
-        (self.out / "model.safetensors.index.json").write_text(
+            done = self.out / f"model-{n:05d}-of-{self.shard_no:05d}.safetensors"
+            if src.exists():
+                src.rename(done)
+            elif not done.exists():
+                # Neither name is there: the snapshot is not this run's to
+                # finish, and saying so is better than renaming a shard that
+                # does not exist (AUD-0102).
+                raise FileNotFoundError(f"{src} is missing from the converted snapshot")
+            # A kill between two renames leaves the earlier shards renamed;
+            # this run renames the rest and leaves those alone.
+        index = self.out / "model.safetensors.index.json"
+        # The index is what makes the snapshot loadable, so it is written
+        # beside and renamed: a kill mid-write must not leave a torn document
+        # that the next run then refuses to adopt (AUD-0102; the qwen38
+        # converter had the same defect, AUD-0077).
+        temporary = self.out / ".model.safetensors.index.json.tmp"
+        temporary.write_text(
             json.dumps({"metadata": {"total_size": self.total}, "weight_map": final}, indent=1)
         )
+        os.replace(temporary, index)
 
 
 def convert_shard(

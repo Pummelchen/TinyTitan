@@ -496,3 +496,87 @@ class DenseBitsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(prepare is None, f"prepare_agentworld unavailable: {IMPORT_ERROR}")
+class FinishIsAtomicAndRepeatableTests(unittest.TestCase):
+    """`OutputWriter.finish` is the snapshot's completion step.
+
+    It renamed every shard and then wrote the index in place. A kill between two
+    renames left the earlier shards renamed and the rest not, so a re-run's
+    `finish` raised `FileNotFoundError` on the first missing name — the
+    converter's own reconciliation never got a chance. A kill during the index
+    write left a torn document that no reader could adopt. Both are AUD-0102.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.out = pathlib.Path(self.tmp.name) / "snapshot"
+
+    def one_shard_writer(self):
+        import numpy as np
+
+        writer = prepare.OutputWriter(self.out)
+        writer.add("model.language_model.layers.0.mlp.gate.weight", np.zeros((2, 2), np.float32))
+        return writer
+
+    def test_finishing_twice_is_safe_and_idempotent(self):
+        writer = self.one_shard_writer()
+        writer.finish()
+        index = self.out / "model.safetensors.index.json"
+        first = index.read_text()
+        # The rename step sees the already-final name and leaves it alone; the
+        # index is rewritten to the same bytes.
+        writer.finish()
+        self.assertEqual(index.read_text(), first)
+        self.assertEqual(
+            sorted(p.name for p in self.out.glob("*.safetensors")),
+            ["model-00001-of-00001.safetensors"],
+        )
+
+    def test_a_partly_renamed_snapshot_is_finished(self):
+        # What a kill between two renames leaves: shard 1 final, shard 2 not.
+        import numpy as np
+
+        writer = prepare.OutputWriter(self.out)
+        writer.add("a", np.zeros((1, 1), np.float32))
+        writer.flush()
+        writer.add("b", np.zeros((1, 1), np.float32))
+        writer.flush()
+        (self.out / "model-00001.safetensors").rename(
+            self.out / "model-00001-of-00002.safetensors"
+        )
+        writer.finish()
+        self.assertEqual(
+            sorted(p.name for p in self.out.glob("*.safetensors")),
+            ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"],
+        )
+        self.assertEqual(
+            json.loads((self.out / "model.safetensors.index.json").read_text())["weight_map"],
+            {
+                "a": "model-00001-of-00002.safetensors",
+                "b": "model-00002-of-00002.safetensors",
+            },
+        )
+
+    def test_a_torn_index_is_replaced_not_appended(self):
+        writer = self.one_shard_writer()
+        index = self.out / "model.safetensors.index.json"
+        index.write_text('{"metadata": {"total_size": 4}, "weight_map": {"a"')
+        writer.finish()
+        document = json.loads(index.read_text())
+        self.assertIn(
+            "model.language_model.layers.0.mlp.gate.weight", document["weight_map"])
+        # Written beside and renamed, so no temporary is left behind.
+        self.assertEqual(list(self.out.glob(".*index*")), [])
+
+    def test_a_missing_shard_is_named_not_renamed(self):
+        import numpy as np
+
+        writer = prepare.OutputWriter(self.out)
+        writer.add("a", np.zeros((1, 1), np.float32))
+        writer.flush()
+        (self.out / "model-00001.safetensors").unlink()
+        with self.assertRaises(FileNotFoundError):
+            writer.finish()
