@@ -14,15 +14,13 @@ and a missing `pgrep` adds a fourth (the shell's 127). Measured on this host
     # tools/golden-baseline.sh:130 -- the gate that runs before a capture
     if busy=$(pgrep -fl 'TinyTitanServer|...' 2>/dev/null); then
 
-    # tools/verify_cpu_models.sh:33 -- and it asks a second time to print them
-    if pgrep -fl "$GUARD" >/dev/null 2>&1; then
-
     # tools/install_tinytitan.sh:184 -- counts lines, so an error is "0 lines"
     if [[ "$(pgrep -fl '...' 2>/dev/null | wc -l | tr -d ' ')" != "0" ]]; then
 
-Run against those three shapes with a stub pgrep answering 2
+Run against those two shapes with a stub pgrep answering 2
 (/tmp/aud268b/shapes.sh): `GOLDEN: reached the run (busy=[])`, `INSTALLER:
-proceeded without warning`, `CPU: reached the build`, exit 0. The consequence is
+proceeded without warning`, exit 0. A third site, the dense CPU verifier, had the
+same shape; TT-142 removed that script with the family it verified. The consequence is
 the one the guard exists to prevent -- a second model process beside a live one,
 which AGENTS.md forbids and which makes every number the run produces noise.
 
@@ -94,7 +92,6 @@ exit 1
 
 SHELL_CALLERS = [
     "tools/golden-baseline.sh",
-    "tools/verify_cpu_models.sh",
 ]
 PYTHON_CALLERS = [
     "benchmark/tinytitan_knob_sweep.py",
@@ -238,7 +235,7 @@ class GoldenBaselineGuardTests(unittest.TestCase):
             env["STUB_PGREP_OUT"] = out
             env["STUB_PGREP_ERR"] = err
             return subprocess.run(
-                ["/bin/bash", str(root / "tools" / "golden-baseline.sh"), "ornith-8"],
+                ["/bin/bash", str(root / "tools" / "golden-baseline.sh"), "ornith-4"],
                 capture_output=True,
                 text=True,
                 check=False,
@@ -273,47 +270,6 @@ class GoldenBaselineGuardTests(unittest.TestCase):
         self.assertNotIn("refusing to start", proc.stderr, proc.stderr)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertIn("captured", proc.stdout, proc.stdout)
-
-
-class VerifyCpuModelsGuardTests(unittest.TestCase):
-    """End to end through the CPU-model verifier, which must not reach its build."""
-
-    def _run(self, rc: str, out: str, err: str = "") -> subprocess.CompletedProcess:
-        with stub_bin() as bin_dir:
-            env = {
-                "STUB_PGREP_RC": rc,
-                "STUB_PGREP_OUT": out,
-                "STUB_PGREP_ERR": err,
-            }
-            proc = run_bash(f"/bin/bash '{ROOT / 'tools' / 'verify_cpu_models.sh'}'", env, bin_dir)
-            self.assertNotIn(
-                "SWIFT-STUB",
-                proc.stdout + proc.stderr,
-                "the verifier reached its build past the guard",
-            )
-            return proc
-
-    def test_a_live_model_process_stops_the_verifier(self) -> None:
-        proc = self._run("0", BUSY_LINES)
-        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
-        self.assertIn("already running", (proc.stdout + proc.stderr).lower(), proc.stdout)
-
-    def test_an_erroring_pgrep_stops_the_verifier(self) -> None:
-        proc = self._run("2", "", PGREP_ERROR)
-        self.assertEqual(
-            proc.returncode, 2, f"an unanswered guard read as clear: {proc.stdout}{proc.stderr}"
-        )
-        self.assertIn(
-            "parentheses not balanced",
-            proc.stdout + proc.stderr,
-            proc.stdout + proc.stderr,
-        )
-
-    def test_the_verifier_prints_the_lines_it_was_given(self) -> None:
-        """The old script asked pgrep a second time to print the matches; the
-        guard hands back the lines it already collected, once."""
-        proc = self._run("0", BUSY_LINES)
-        self.assertIn("17514", proc.stdout + proc.stderr, proc.stdout + proc.stderr)
 
 
 class InstallerGuardBlockTests(unittest.TestCase):

@@ -32,8 +32,8 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "tools" / "golden-baseline.sh"
-MODEL_DIR = "ornith-1.5_35B_A3B_8Bit"
-BASELINE_NAME = "ornith-1.5-35b-a3b-8bit.txt"
+MODEL_DIR = "ornith-1.5_35B_A3B_4Bit"
+BASELINE_NAME = "ornith-1.5-35b-a3b-4bit.txt"
 
 # Prints exactly what the test asks and exits with the status it asks, so both
 # the empty generation and a refusal are reproducible without a model.
@@ -74,7 +74,7 @@ SERVER_STUB = """#!/bin/sh
 id="${GOLDEN_FIXTURE_CATALOG_ID-}"
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ -n "$id" ]; then
-  printf '{"models":[{"id":"%s","path":"%s"}]}\\n' "$id" "$root/models/ornith-1.5_35B_A3B_8Bit"
+  printf '{"models":[{"id":"%s","path":"%s"}]}\\n' "$id" "$root/models/ornith-1.5_35B_A3B_4Bit"
 else
   printf '{"models":[]}\\n'
 fi
@@ -127,8 +127,8 @@ def tree(*, golden_is_file: bool = False, baseline_is_dir: bool = False):
         # the launcher, which is what makes the two catalog-id tests fail on the
         # old code instead of dying on a missing file.
         (model / "manifest.json").write_text(
-            '{"modelID": "ornith-1.5_35B_A3B_8Bit",'
-            ' "quant": {"routedExpert": {"weightBits": 8}}}\n',
+            '{"modelID": "ornith-1.5_35B_A3B_4Bit",'
+            ' "quant": {"routedExpert": {"weightBits": 4}}}\n',
             encoding="utf-8",
         )
         golden = root / "benchmark" / "golden"
@@ -202,7 +202,7 @@ SAMPLE = "A mutex is a lock. Use it when two threads write the same value.\n"
 class GoldenCaptureTests(unittest.TestCase):
     def test_capture_refuses_a_generation_that_produced_nothing(self) -> None:
         with tree() as root:
-            result = run(root, "", "ornith-8")
+            result = run(root, "", "ornith-4")
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             # Refusing is only half of it: a vacuous baseline must not be left
             # behind for the next `--check` to certify.
@@ -212,20 +212,20 @@ class GoldenCaptureTests(unittest.TestCase):
 
     def test_check_refuses_a_baseline_with_an_empty_body(self) -> None:
         with tree() as root:
-            captured = run(root, SAMPLE, "ornith-8")
+            captured = run(root, SAMPLE, "ornith-4")
             self.assertEqual(captured.returncode, 0, captured.stdout + captured.stderr)
             path = baseline(root)
             path.write_text(
                 path.read_text(encoding="utf-8").split("---\n", 1)[0] + "---\n",
                 encoding="utf-8",
             )
-            result = run(root, "", "--check", "ornith-8")
+            result = run(root, "", "--check", "ornith-4")
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertNotIn("identical to baseline", result.stdout)
 
     def test_capture_reports_the_size_of_the_file_it_wrote(self) -> None:
         with tree() as root:
-            result = run(root, SAMPLE, "ornith-8")
+            result = run(root, SAMPLE, "ornith-4")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             reported = re.search(r"captured -> \S+ \((\d+) bytes\)", result.stdout)
             self.assertIsNotNone(reported, result.stdout)
@@ -238,7 +238,7 @@ class GoldenCaptureTests(unittest.TestCase):
 
     def test_capture_fails_when_the_output_dir_cannot_be_made(self) -> None:
         with tree(golden_is_file=True) as root:
-            result = run(root, SAMPLE, "ornith-8")
+            result = run(root, SAMPLE, "ornith-4")
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertNotIn("captured ->", result.stdout)
             # The message is asserted, not just the exit code: the write guard
@@ -250,26 +250,26 @@ class GoldenCaptureTests(unittest.TestCase):
         # The output directory is sound here, so the only thing that can refuse
         # this capture is the status of the write itself.
         with tree(baseline_is_dir=True) as root:
-            result = run(root, SAMPLE, "ornith-8")
+            result = run(root, SAMPLE, "ornith-4")
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertNotIn("captured ->", result.stdout)
             self.assertIn("FAILED to write", result.stdout, result.stdout + result.stderr)
 
     def test_a_normal_capture_stays_checkable(self) -> None:
         with tree() as root:
-            captured = run(root, SAMPLE, "ornith-8")
+            captured = run(root, SAMPLE, "ornith-4")
             self.assertEqual(captured.returncode, 0, captured.stdout + captured.stderr)
             self.assertEqual(baseline(root).read_text(encoding="utf-8").count("---\n"), 1)
             self.assertEqual(body(baseline(root)), SAMPLE)
-            checked = run(root, SAMPLE, "--check", "ornith-8")
+            checked = run(root, SAMPLE, "--check", "ornith-4")
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
             self.assertIn("identical to baseline", checked.stdout)
 
     def test_a_real_mismatch_still_fails_the_check(self) -> None:
         with tree() as root:
-            captured = run(root, SAMPLE, "ornith-8")
+            captured = run(root, SAMPLE, "ornith-4")
             self.assertEqual(captured.returncode, 0, captured.stdout + captured.stderr)
-            result = run(root, "Something else came out.\n", "--check", "ornith-8")
+            result = run(root, "Something else came out.\n", "--check", "ornith-4")
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("MISMATCH", result.stdout)
 
@@ -341,7 +341,7 @@ class GoldenOperatorNumbers(unittest.TestCase):
     def refuse(self, **operator_values: str) -> None:
         name = next(iter(operator_values))
         with tree() as root:
-            result = run(root, SAMPLE, "ornith-8", **operator_values)
+            result = run(root, SAMPLE, "ornith-4", **operator_values)
             self.assert_refused(root, result, name)
 
     def test_a_word_for_max_new_refuses(self) -> None:
@@ -367,7 +367,7 @@ class GoldenOperatorNumbers(unittest.TestCase):
         # The twin of the AUD-301 lesson: do not invent a refusal for a value the
         # reader accepts. `0` is a switch to nothing here; it is a seed.
         with tree() as root:
-            result = run(root, SAMPLE, "ornith-8", SEED="0")
+            result = run(root, SAMPLE, "ornith-4", SEED="0")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("captured ->", result.stdout)
             self.assertIn("# seed:        0", baseline(root).read_text(encoding="utf-8"))
@@ -409,7 +409,7 @@ class GoldenOperatorNumbers(unittest.TestCase):
         for operator_values in cases:
             with self.subTest(**operator_values):
                 with tree() as root:
-                    result = run(root, SAMPLE, "ornith-8", **operator_values)
+                    result = run(root, SAMPLE, "ornith-4", **operator_values)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertIn("captured ->", result.stdout)
 
@@ -427,10 +427,10 @@ class GoldenOperatorNumbers(unittest.TestCase):
         # The guard must sit over the refusals only: the plain documented call
         # still captures, and still checks.
         with tree() as root:
-            result = run(root, SAMPLE, "ornith-8")
+            result = run(root, SAMPLE, "ornith-4")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("captured ->", result.stdout)
-            checked = run(root, SAMPLE, "--check", "ornith-8")
+            checked = run(root, SAMPLE, "--check", "ornith-4")
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
             self.assertIn("identical to baseline", checked.stdout)
 
@@ -451,7 +451,7 @@ class GoldenServerCatalogId(unittest.TestCase):
             root,
             SAMPLE,
             "--server",
-            "ornith-8",
+            "ornith-4",
             env_overrides={
                 "GOLDEN_FIXTURE_CATALOG_ID": catalog_id,
                 "GOLDEN_FIXTURE_LAUNCHER_ARGS": str(log),
@@ -460,7 +460,7 @@ class GoldenServerCatalogId(unittest.TestCase):
         return result, log
 
     def test_the_launcher_is_given_the_catalog_id(self) -> None:
-        # Deliberately not the `<modelID>_8-Bit` the old guess produced: the id
+        # Deliberately not the `<modelID>_4-Bit` the old guess produced: the id
         # is read from the catalog, so an id that follows no convention still
         # reaches the launcher intact.
         with tree() as root:

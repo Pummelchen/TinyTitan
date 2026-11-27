@@ -127,47 +127,36 @@ jobs:
         # `PluginRegistry`, and resolving a matching install.
         run: tools/plugin-dependency-check.sh
       - name: Converter gates (synthetic checkpoint, fault injection)
-        # `tools/prepare_qwen38.py` converts a 360 GB checkpoint. The unit suite
-        # pins its pieces; the end-to-end suite runs `main()` against a
-        # synthetic one served from 127.0.0.1 (real curl downloads, injected
-        # transport failures, a killed process, a table copied across a disk
-        # image) and requires every recovery to produce the clean-run snapshot.
-        # The same venv runs `tools/prepare_agentworld.py`'s unit suite, which
-        # covers the Qwen3.5-MoE per-expert fusion at both widths from a
-        # synthetic in-memory shard (issue #19).
-        # The fourth suite is `tinytitan_quant_fidelity.py`, the dequantise-and-
+        # `tools/prepare_agentworld.py` is the one converter the shipped matrix
+        # uses: it streams Ornith 1.5 35B-A3B's checkpoint, quantizes it shard by
+        # shard, and `tools/install_models.sh ornith15` calls it. The unit suite
+        # pins the pieces; the end-to-end suite runs `main()` against a
+        # synthetic checkpoint served from 127.0.0.1 (real curl downloads,
+        # injected transport failures, a killed process, a table copied across a
+        # disk image) and requires every recovery to produce the clean-run
+        # snapshot.
+        # The third suite is `tinytitan_quant_fidelity.py`, the dequantise-and-
         # compare checker that says whether a quantised build is faithful to the
         # official one. It lives here rather than in the model-free step because
         # it imports numpy, which only this venv carries. Its own tests fake
         # `fetch()` with in-memory arrays, so no checkpoint and no model is ever
         # read, and no shard is downloaded.
-        # The fifth is `test_reconcile_snapshot_verdict.py`, the pre-repack check's
-        # verdict. `tools/reconcile_snapshot.py --check` samples six of the tensors
-        # that need the RMSNorm `+1` folded in and called the rest folded, so a
-        # snapshot whose norms 7..N were never fetched printed "snapshot matches the
-        # converter policy" and returned 0 (AUD-270). It builds a synthetic
-        # checkpoint with 24 of them, serves it from 127.0.0.1 the way the two
-        # converter suites do, and pins the three statuses apart: 0 every tensor
-        # compared and matched, 1 one drifted and the report names which, 2 one
-        # could not be compared. No model, no install, no real shard.
-        # The sixth is `test_two_bit_pack.py`, the tiered converter's 4-bit to
+        # The fourth is `test_two_bit_pack.py`, the tiered converter's 4-bit to
         # 2-bit remap: a pure numpy round trip pinning that every 4-bit value
         # maps to its nearest 2-bit level (k*5), that a random stream halves in
         # length and expands back to the same levels, and that a stream that is
         # not a multiple of four bytes is refused. No model, no install.
-        # Measured on this Mac with the six suites together: 118 tests, 42.3 s;
-        # test_requantize_qwen38_rest (2 tests, <1 s) was added after.
         # A venv because the runner does not carry the converter's three
         # dependencies. No real shard is ever fetched.
+        # Measured on this Mac with the four suites together: 51 tests, 13.7 s.
         run: |
           python3 -m venv /tmp/tt-converter
           /tmp/tt-converter/bin/pip install --quiet --disable-pip-version-check \
             -r benchmark/requirements.txt
           cd benchmark
-          /tmp/tt-converter/bin/python -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
-            test_prepare_qwen35 test_prepare_agentworld test_tinytitan_quant_fidelity \
-            test_reconcile_snapshot_verdict test_two_bit_pack test_requantize_qwen38_rest \
-            test_agentworld_resume_e2e
+          /tmp/tt-converter/bin/python -m unittest test_prepare_agentworld \
+            test_agentworld_resume_e2e test_tinytitan_quant_fidelity \
+            test_two_bit_pack
       - name: Installer and launcher gates (model-menu and launcher choices)
         # These tests pin the installer's and launcher's choice handling: a
         # factory-new Mac is not written outside the install root, and the model
@@ -177,12 +166,6 @@ jobs:
         # so `--all-8bit` exited 0 with a model it had refused and `--all-4bit`
         # exited 1 with nothing missing (AUD-253). It drives the dispatcher's own
         # branch text with `install_one` stubbed, so it installs nothing.
-        # `test_repack_dense_gate_verdict` pins the other installer gate's verdict:
-        # `tools/repack_dense.sh` step 5 is the only step that proves the `.ssdai`
-        # reader interprets the bytes, and `swift test` exits 0 both when a `--filter`
-        # matches no test and when every test of a model-gated suite skipped (AUD-261).
-        # It feeds the script's own verdict function canned logs, so it starts no model
-        # and runs no test target.
         # `test_release_test_gate` pins the release's own test gate: `swift test` prints one
         # summary line per test target -- seven here -- so `grep -q 'Test run with .* passed'`
         # was satisfied by one passing target while six reported failures, and the `|| true`
@@ -236,19 +219,6 @@ jobs:
         # it, and the suite pins that the two copies are the same text. Shell callers run
         # against a stub `pgrep` and a stub `swift`; the competitor-pid sites answer from a
         # faked HTTP reply. Nothing here starts a model or dials a peer.
-        # `test_parity_harness_status` pins the exit statuses of the qwen38 parity
-        # harness -- `tools/qwen38_parity.py`, `tools/qwen38_full_forward.py` and
-        # `tools/qwen38_sequence_parity.py`, the three scripts docs/qwen38-flash-next-port.md
-        # lists as comparing a run's activation dumps against the numpy reference.
-        # `report()` returned a verdict for every stage and `main()` dropped all nine,
-        # so eight `FAIL` lines and status 0 went out together and
-        # `... && echo "parity ok"` printed its sentence over a run that agreed with
-        # nothing. The suite runs the real scripts as their own processes against a
-        # synthetic weight table and real `.f16` dumps, and pins the three answers
-        # apart: 0 agreed, 1 disagreed, 2 nothing could be compared. No model, no
-        # install, no socket. It is the group's slowest suite (about three minutes),
-        # because the sequence cases run the whole 48-layer reference before they
-        # reach the guard they are testing.
         # `test_launcher_install` pins the launcher's own fetch path:
         # the stem-to-catalogue-key map, and that neither a pipe nor `--dry-run`
         # can start a download. `test_progress` pins the line those downloads
@@ -278,12 +248,11 @@ jobs:
         run: |
           cd benchmark
           python3 -m unittest test_install_models_menu \
-            test_install_models_batch_status test_repack_dense_gate_verdict \
+            test_install_models_batch_status \
             test_release_test_gate test_release_notes_compact \
             test_release_notes_budget_gate test_assert_arch \
             test_build_log_gate test_release_precondition_gate \
             test_model_process_guard \
-            test_parity_harness_status \
             test_launcher_install test_launcher_ram test_launcher_port \
             test_models_memory_gate \
             test_launcher_concurrency test_launcher_lifetime test_coder_clients \

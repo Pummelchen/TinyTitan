@@ -1,14 +1,16 @@
-# The three dependencies the benchmark suite and tools/prepare_qwen38.py import.
+# The three dependencies the converter suite and tools/prepare_agentworld.py
+# import. `tools/prepare_agentworld.py` is the one converter the shipped matrix
+# uses (Ornith 1.5 35B-A3B); the converters for the families TT-142 retired left
+# the tree with them.
 #
 # Pinned to the versions the converter gate was verified under on 2026-10-06
-# (2026-10-06: `test_prepare_qwen38`, `test_qwen38_resume_e2e` and
-# `test_prepare_agentworld` ran clean here -- 75 tests for the first two, 87 for
-# all three, none skipped). The counts are a record of the run, not a promise:
-# what CI enforces is that the three suites exit 0, so a new test moving these
-# numbers is not a failure. Both CI workflows install from this file, so the
-# converter gate and the verification suite resolve the same set; `pip-audit -r
-# benchmark/requirements.txt` is run against it (pip-audit 2.10.1: no known
-# vulnerabilities).
+# (the converter suites this tree carried then ran clean here, none skipped;
+# TT-142 has since removed the ones whose families left the matrix, 2026-11-27).
+# The counts were a record of that run, not a promise: what CI enforces is that
+# the group exits 0, so a new test moving these numbers is not a failure. Both CI
+# workflows install from this file, so the converter gate and the verification
+# suite resolve the same set; `pip-audit -r benchmark/requirements.txt` is run
+# against it (pip-audit 2.10.1: no known vulnerabilities).
 numpy==2.5.3
 safetensors==0.8.0
 ml_dtypes==0.6.0

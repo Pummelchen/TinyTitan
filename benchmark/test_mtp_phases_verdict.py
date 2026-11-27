@@ -39,8 +39,8 @@ survivor, with no count printed anywhere. Measured: `acceptance 90.0%` over 1 of
 empty and the driver dies mid-report, after the headline rates printed, with
 `StatisticsError: no median for empty data`.
 
-The statuses are the tree's three, as in `tools/model-guard.sh`,
-`tools/qwen35_reference.py:411` and the parity harness (AUD-269):
+The statuses are the tree's three, as in `tools/model-guard.sh` and the drivers
+below:
 
     0  both arms measured, and every claim of the sweep holds
     1  it measured, and a claim failed -- with the claim named

@@ -458,20 +458,22 @@ deliberate numerics change, never to make a mismatch go away.
 
 The converter's core python suites, run together — the same runs CI makes:
 
-    cd benchmark && python3 -m unittest test_prepare_qwen38 test_qwen38_resume_e2e \
-      test_prepare_qwen35 test_prepare_agentworld
+    cd benchmark && python3 -m unittest test_prepare_agentworld \
+      test_agentworld_resume_e2e test_tinytitan_quant_fidelity test_two_bit_pack
 
-`test_prepare_qwen38` pins the pieces (shard validation, the constants gate, the
-retry loop) in a second. `test_qwen38_resume_e2e` runs `main()` end to end against a
-synthetic checkpoint served from 127.0.0.1 — real `curl` downloads into a scratch
-directory with transfers dropped, truncated, stalled, 404'd and range-refused, a real
-`SIGKILL` mid-conversion, a truncated adopted shard, a table reused in place or
-copied across a mounted disk image — and asserts that every recovery ends with the
-same snapshot a clean run produces. `test_prepare_agentworld` covers the
-Qwen3.5-MoE per-expert fusion at both widths from a synthetic in-memory shard
-(issue #19). None fetches a real shard, so they are safe in CI and take about half a
-minute. Run all three after any change to the converter, the resume path, the n-gram
-table or the download loop; they need `numpy`, `safetensors` and `ml_dtypes`, which
+`test_prepare_agentworld` covers the Qwen3.5-MoE per-expert fusion at both widths
+from a synthetic in-memory shard (issue #19). `test_agentworld_resume_e2e` runs the
+same converter's `main()` end to end against a synthetic checkpoint served from
+127.0.0.1 — real `curl` downloads into a scratch directory with transfers dropped,
+truncated, stalled, 404'd and range-refused, a real `SIGKILL` mid-conversion, a
+truncated adopted shard, a table reused in place or copied across a mounted disk
+image — and asserts that every recovery ends with the same snapshot a clean run
+produces. `test_tinytitan_quant_fidelity` pins the dequantise-and-compare checker's
+verdict, and `test_two_bit_pack` the tiered converter's 4-bit to 2-bit remap; both
+are pure-numpy over in-memory arrays. None fetches a real shard, so they are safe in
+CI and take about fifteen seconds together. Run all four after any change to the
+converter, the resume path, the n-gram table or the download loop; they need
+`numpy`, `safetensors` and `ml_dtypes`, which
 `benchmark/requirements.txt` pins and the runner does not carry — CI installs them
 into a venv first.
 

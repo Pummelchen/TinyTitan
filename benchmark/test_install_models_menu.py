@@ -223,8 +223,6 @@ class StagingPathTests(unittest.TestCase):
             "prepare_ornith_mtp",
             "convert_qwen35moe_dense16",
             "convert_qwen35moe_solo",
-            "prepare_qwen38.py",
-            "prepare_qwen35.py",
             "rest8_arg",
             "install_both",
             "--all-8bit)",

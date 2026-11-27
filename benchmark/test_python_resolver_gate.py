@@ -301,12 +301,7 @@ class TheLibraryContractItself(ResolverCase):
 
 TOOLS = pathlib.Path(__file__).resolve().parent.parent / "tools"
 REFUSING = [
-    "prepare_qwen35.py",
-    "prepare_qwen38.py",
-    "prepare_qwen38_mtp.py",
     "prepare_agentworld.py",
-    "reconcile_snapshot.py",
-    "patch_snapshot_precision.py",
 ]
 STUB_NUMPY = 'raise ImportError("numpy is not installed (test stub)")\n'
 
@@ -314,7 +309,8 @@ STUB_NUMPY = 'raise ImportError("numpy is not installed (test stub)")\n'
 class DependencyRefusalMessageTests(unittest.TestCase):
     """AUD-296: the same token's other half, where it is a message rather than a status.
 
-    Six `tools/` Python files end their missing-dependency refusal with
+    The one `tools/` Python file left with a converter-style refusal ends its
+    missing-dependency message with
     `(or point TINYTITAN_PYTHON at another Python 3.10+)`. The variable has a reader --
     `tools/lib/python.sh`, tested in the class above -- but it is not this file: run
     against a stdlib-only interpreter, the refusal is byte-identical with the variable
@@ -322,6 +318,10 @@ class DependencyRefusalMessageTests(unittest.TestCase):
     that prints the advice has already chosen its own interpreter. Measured with a
     `numpy` stub that fails to import, which is what these tests do: no venv, nothing
     fetched, no model.
+
+    The list was six files while the retired families' converters were in the tree;
+    TT-142 removed them with their families, and the invariant is asserted over every
+    file that still carries the sentence rather than over the old count.
 
     The assertion is the narrow form of the invariant, per file rather than as a rule
     over every message in `tools/`: a refusal that names an environment variable has
@@ -372,14 +372,16 @@ class DependencyRefusalMessageTests(unittest.TestCase):
                 name,
             )
 
-    def test_the_six_files_refuse_with_one_wording(self) -> None:
+    def test_the_refusal_wording_is_the_same(self) -> None:
         lines = set()
         for name in REFUSING:
             source = (TOOLS / name).read_text()
             found = [ln for ln in source.splitlines() if "TINYTITAN_PYTHON" in ln]
             self.assertEqual(len(found), 1, f"{name}: {found}")
             lines.add(found[0].strip())
-        self.assertEqual(len(lines), 1, f"six refusals, {len(lines)} wordings: {lines}")
+        self.assertEqual(
+            len(lines), 1, f"{len(REFUSING)} refusal(s), {len(lines)} wording(s): {lines}"
+        )
 
 
 if __name__ == "__main__":

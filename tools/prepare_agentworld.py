@@ -6,10 +6,10 @@ AgentWorld's text model is the Qwen3.5-MoE 35B-A3B geometry this runtime
 already runs as the `qwen36` family (2048 hidden, 40 layers, 256 experts at
 top-8, gated-DeltaNet with full attention every fourth layer). What differs
 is the source: Qwen ships it as bf16 under the vision wrapper's tensor names,
-with the routed experts fused per layer. So this is prepare_qwen38.py's job
--- fetch one shard at a time, quantize, write MLX-shaped output, delete the
+with the routed experts fused per layer. So this is a streaming converter's
+job -- fetch one shard at a time, quantize, write MLX-shaped output, delete the
 shard once its output has reached disk -- with this family's renames and slot
-policy, and without Qwen3.8's n-gram table, PLE constants and indexer.
+policy, and without an n-gram table, PLE constants or indexer.
 
 Disk footprint while running: up to twenty source shards (~90 GB), a few
 completed ones waiting to convert, plus the output (about 19.5 GB at 4-bit,
@@ -54,8 +54,8 @@ from pathlib import Path
 from queue import Full, Queue
 
 # The progress line lives beside the shell helpers, not in this file, because
-# prepare_qwen38.py draws the identical line: a whole install has to read as one
-# story, and two renderers would drift.
+# every converter in this tree draws the identical line: a whole install has to
+# read as one story, and two renderers would drift.
 sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 from progress import Progress  # noqa: E402
 
@@ -130,10 +130,11 @@ TOKENIZER_FILES = (
 
 
 def quantize_affine(value: np.ndarray, bits: int) -> tuple[np.ndarray, ...]:
-    """Identical to prepare_qwen38.quantize_affine, deliberately.
+    """Group-64 affine quantization at the requested width.
 
-    Duplicated rather than imported so neither converter can drift silently;
-    a change to one must be made in the other.
+    It was once duplicated in the Qwen3.8 converter so neither copy could drift
+    silently; that converter left the tree with TT-142 (2026-11-27), so this is
+    now the only copy.
     """
     value = value.astype(np.float32)
     if value.shape[-1] % GROUP_SIZE:

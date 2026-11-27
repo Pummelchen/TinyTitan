@@ -38,8 +38,7 @@ Measured on the committed tree before the fix (twelve shapes, the driver's own
    named;
 10. one arm at two digests across its own runs: rc=1.
 
-The statuses are the three `tools/model-guard.sh`,
-`tools/qwen35_reference.py:411` and `tools/reconcile_snapshot.py` already use, and
+The statuses are the three `tools/model-guard.sh` already uses, and
 the counting primitives are the `tinytitan_profile` ones AUD-273 added and AUD-274
 reused rather than re-derived per driver:
 

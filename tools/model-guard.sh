@@ -13,19 +13,20 @@
 #   2  it could not ask; why is on stderr
 #
 # AGENTS.md makes "no process from `pgrep -fl 'TinyTitanServer|TinyTitanCLI|...'`"
-# a precondition of every model run, and until now each of the three shell callers
-# asked pgrep itself, in a shape that can only act on one answer
-# (AUD-268):
+# a precondition of every model run, and until now each shell caller asked pgrep
+# itself, in a shape that can only act on one answer (AUD-268):
 #
 #   if busy=$(pgrep -fl '...' 2>/dev/null); then          # golden-baseline.sh:130
-#   if pgrep -fl "$GUARD" >/dev/null 2>&1; then           # verify_cpu_models.sh:33
 #   if [[ "$(pgrep -fl '...' | wc -l | tr -d ' ')" != "0" ]]; then   # installer:184
+#
+# (A third caller, the dense CPU verifier, had the same shape; TT-142 removed
+# that script with the family it verified.)
 #
 # `pgrep` answers 0 matched, 1 matched nothing, 2 an error, and a missing `pgrep`
 # adds the shell's 127. Measured on this host with a stub pgrep for each status
-# (/tmp/aud268b/shapes.sh): all three shapes run the model anyway on status 2 --
+# (/tmp/aud268b/shapes.sh): both shapes run the model anyway on status 2 --
 # `GOLDEN: reached the run (busy=[])`, `INSTALLER: proceeded without warning`,
-# `CPU: reached the build`, exit 0. The status 2 is reachable without a race:
+# exit 0. The status 2 is reachable without a race:
 # `/usr/bin/pgrep -fl '('` answers it here with `pgrep: Cannot compile regular
 # expression `(' (parentheses not balanced)`. So an error read as "no model
 # process running", and the run started beside a live server -- exactly what the

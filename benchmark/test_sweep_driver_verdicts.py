@@ -41,8 +41,8 @@ nothing here starts a model, a server, a build, a Core ML program or a download.
    the one a first mutation sweep left alive, and it now names a zero denominator
    as a contested claim instead of dividing by it.
 
-The three statuses are the ones `tools/model-guard.sh`,
-`tools/qwen35_reference.py:411` and `tools/reconcile_snapshot.py` already use:
+The three statuses are the ones `tools/model-guard.sh` and the drivers below
+already use:
 
     0  every published figure came from a run that measured it
     1  it measured, and something the page claims is contested -- with the claim named
