@@ -48,12 +48,12 @@ Reviewed 2026-11-27 at `84006bb8`:
 | module | tier | lines | L1 | L2 | L3 | L4 | L5 | L6 | L7 | evidence / residual |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `TinyTitanKernelsC` | A | ~1.9k | R | – | R | R | P | R | N | every `.c` and header read line-by-line 2026-11-27; AUD-0078/0079/0080 fixed, AUD-0085 open; bench numbers exist for L5 but no review |
-| `TinyTitanCore/Metal` (kernels) | A | — | P | – | R | P | – | R | N | attention, rmsnorm, gdn, kv-quant, dequant, gguf partial reviewed (AUD-0082 fixed); `logit`, `nemotron`, `tensorops`, `fused`, `primitive`, `rope`, `qsa`, `depth_decode`, `drafthead`, `ple` not reviewed |
+| `TinyTitanCore/Metal` (kernels) | A | — | P | – | R | R | – | R | N | every kernel family read line-by-line 2026-11-27 (attention, rmsnorm, gdn, kv-quant, dequant, gguf, logit/sampling, rope, utility, folded/fused, tensorops, qsa, depth_decode, drafthead, short_conv, relative_attention, ple); `logit`/`rope`/`utility`/`fused`/`qsa`/`drafthead` verified clean, the rest carried AUD-0082/0091/0092/0093/0094/0096 |
 | `TinyTitanCore` (Swift) | A | 10.3k | P | P | P | P | – | P | N | `JSONValue`/schema/grammar, manifest reader, format types, `Sampling`, `ChatDialect` read; AUD-0065/0077/0086 fixed, AUD-0084 open; tokenizer internals and `Generation/*` beyond the schema path not reviewed |
 | `TinyTitanFormat` | A | 2.9k | R | P | R | R | – | R | N | manifest/format/index/layout/RANS/GGUF-header readers read; AUD-0074 closed by using its validator in the verifier; `SSDAIBlockEncodingV1`, `SSDAIVariantGeometryV1`, `Inkling2*` arch types skimmed |
-| `Engines/Ornith35B4Bit` | A | 55.6k | P | P | P | P | – | P | N | reader/RANS/streaming, kernels cited in the native pass, plugin surface read; `RealForwardRunner+*`, prefetch ring, host-streaming prefill not reviewed |
-| `Engines/DenseGPU` | A | 55.4k | P | P | P | P | – | P | N | as Ornith (19 files differ); `RoPE.swift` read (AUD-0084 open) |
-| `Engines/Legacy6xRuntime` | A | 60.4k | P | P | P | P | – | P | N | the 6.x runtime, moved here by TT-134(e); audited only where the other rows reach — `Infrastructure/Streaming` (AUD-0060/0062), `Attention.swift`, `VerifiedInstallReceipt`; the rest is TT-132's porting surface |
+| `Engines/Ornith35B4Bit` | A | 55.6k | P | R | R | P | P | R | N | runtime bodies (`RealForwardRunner+*`, prefetch ring, expert cache/slot accounting, host-streaming prefill) read line-by-line 2026-11-27 and the two siblings diffed against it; AUD-0088/0089/0090 recorded; the plugin surface and `Model+Validation` skimmed |
+| `Engines/DenseGPU` | A | 55.4k | P | P | P | P | P | P | N | runtime diffed against Ornith (10 files differ, none in the reviewed seams) so the runtime findings apply unchanged; `RoPE.swift` read (AUD-0084 fixed) |
+| `Engines/Legacy6xRuntime` | A | 60.4k | P | P | P | P | P | P | N | the 6.x runtime, moved here by TT-134(e); runtime/streaming diffed against Ornith (the reviewed runtime files are identical), `Infrastructure/Streaming` (AUD-0060/0062/0081), `Attention.swift`, `VerifiedInstallReceipt`; the 6.x-only MoE/model bodies remain TT-132's porting surface |
 | `Engines/Inkling2GGUFQ4` | A | 4.8k | P | P | R | R | – | R | N | plugin, install, sidecar, weights, decoder graph read; AUD-0065/0075/0076-class fixes here; MTP/`Decoder` internals partial |
 | `Engines/Inkling2NVFP4` | A | 6.1k | P | P | R | R | – | R | N | as above; MTP table and weights read (AUD-0075/0084 fixed); the MTP path is kept but unused |
 | `Engines/Qwen35Dense*` (6) | A | 3.5k each | P | P | P | P | – | P | N | `AffineSnapshot`, `CPUBatchedMatmul`, `CPUTensorOps` read (AUD-0083/0084 open); the six differ only in `Variant.swift` |
@@ -98,20 +98,22 @@ Three read-only reviews plus the manager's own pass, at `92abaf92`–`84006bb8`:
 
 ## Residual, stated plainly
 
-- The `–` cells above are unreviewed, not clean. The largest are the engine
-  runtime bodies (`RealForwardRunner+*`, prefetch, host-streaming prefill), the
-  Metal kernels not listed, the tokenizer internals, `TinyTitanBench`, and most
-  of `tools/`.
-- The 6.x runtime is the porting surface for TT-132 and is audited only where
-  the rows above reach; porting replaces it rather than auditing it twice.
-- Everything this pass found is fixed or closed except **AUD-0087** (three more
-  unbounded maps in the memory actor, the sibling of AUD-0067) and the four open
-  investigations recorded on the parent row. Each closed finding is a commit
-  whose message carries the RED evidence; AUD-0070 did not reproduce and is
-  pinned by a regression test instead.
-- **K2 left the tree** under TT-086/TT-053 (202 files, −17,127 lines), and the
-  `TinyTitanServerCore` row above no longer imports the 6.x runtime at all. The
-  shared `K2MoEStage`/`K2Head` stay because Laguna's probe links them, and MTP is
-  kept, tested and unused.
-- AUD-0008 (independent host) still has to run after this matrix has no
-  unreviewed Tier-A cell, which it does not yet.
+- The `–` and `P` cells above are what no one has read end-to-end: the 6.x MoE
+  and model bodies behind the adapter, `TinyTitanBench`/`TinyTitanValidationSupport`,
+  and most of `tools/` (`install_tinytitan.sh`, `install_models.sh`, the release
+  and gate scripts beyond their failures). The tokenizer's `PromptCheckpoint*`,
+  `JSONGrammar`/`JSONConstraint` beyond the schema path, and the Anthropic
+  mapper bodies were skimmed, not read.
+- The findings this pass produced are the tracker rows AUD-0066…0101; the ones
+  that remain open are AUD-0088…0101 (two S1, one S1 owner decision, the rest
+  S2/S3, three of them open investigations rather than asserted defects). Each
+  row carries the location, the concrete break and the test that should pin it.
+- Everything else this pass found is fixed with a commit whose message carries
+  the RED evidence: 0065, 0066, 0067, 0068, 0069, 0071…0087. AUD-0070 and the
+  `refusedDirectories` half of 0087 did not reproduce; both are closed with a
+  pinning test instead.
+- **K2 and Nemotron left the tree** (TT-086/TT-053/055) and **MTP is kept,
+  tested and unused**; the `TinyTitanServerCore` row imports no 6.x runtime at
+  all. A retired model returns only on a user request.
+- AUD-0008 (independent host) still has to run after this matrix's Tier-A cells
+  are reviewed, which they are not yet.
