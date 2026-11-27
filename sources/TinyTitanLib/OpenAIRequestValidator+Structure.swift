@@ -143,6 +143,27 @@ extension OpenAIRequestValidator {
         "<tool_response>", "</tool_response>",
     ]
 
+    /// A message's text and its optional `name`: text only, no turn-boundary
+    /// marker, and a name shaped like a tool name (it is rendered into the
+    /// template's header). Split out of `validateMessages` to keep that
+    /// function under the length gate (AUD-0098).
+    static func checkedContent(_ message: OpenAIChatMessage) throws -> String? {
+        let content = try message.content?.textValue()
+        if let content, let marker = controlMarker(in: content) {
+            throw invalid(
+                "message content contains the control marker \(marker)",
+                "messages", "invalid_message")
+        }
+        if let name = message.name,
+            name.range(of: #"^[A-Za-z0-9_-]{1,64}$"#, options: .regularExpression) == nil
+        {
+            throw invalid(
+                "message name must match [A-Za-z0-9_-]{1,64}",
+                "messages", "invalid_message")
+        }
+        return content
+    }
+
     static func controlMarker(in text: String) -> String? {
         controlMarkers.first { text.contains($0) }
     }
@@ -201,19 +222,7 @@ extension OpenAIRequestValidator {
             } else {
                 sawConversationMessage = true
             }
-            let content = try message.content?.textValue()
-            if let content, let marker = Self.controlMarker(in: content) {
-                throw invalid(
-                    "message content contains the control marker \(marker)",
-                    "messages", "invalid_message")
-            }
-            if let name = message.name,
-                name.range(of: #"^[A-Za-z0-9_-]{1,64}$"#, options: .regularExpression) == nil
-            {
-                throw invalid(
-                    "message name must match [A-Za-z0-9_-]{1,64}",
-                    "messages", "invalid_message")
-            }
+            let content = try Self.checkedContent(message)
             let calls: [GFTokenizer.HistoricalToolCall] = try (message.toolCalls ?? []).map {
                 call in
                 guard role == .assistant, call.type == "function",
