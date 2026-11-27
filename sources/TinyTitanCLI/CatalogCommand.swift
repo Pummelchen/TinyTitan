@@ -28,8 +28,10 @@ package struct CatalogOptions: Equatable, Sendable {
 
         options:
           --check               Refuse a registry entry naming a missing target,
-                                a variant target with no registry entry, or a
-                                shipped variant with no qualification record.
+                                a variant target with no registry entry, a
+                                shipped variant with no qualification record, or
+                                an `unshippedTargets` row that is missing, is not
+                                an engine variant, or is also registered.
           --markdown            Render the model list as a Markdown table.
           --registry <path>     Registry file (default: registry/registry.json).
           --help                Show this message.
@@ -75,6 +77,13 @@ package enum CatalogCommand {
     /// one finding per inconsistency; empty means consistent. `targets` is every
     /// SwiftPM target name; `variantTargets` is the subset that are engine
     /// variants (the sources/Engines directories).
+    ///
+    /// `unshippedTargets` is the registry's own list of engine targets that are
+    /// in the tree but back no supported install (the dense family, TT-142 slice
+    /// (b)). It is an exclusion, not a loophole: a listed target has to exist and
+    /// be an engine variant, and it may not also be registered as one, so a
+    /// shipped engine cannot be hidden by naming it there. A new engine still
+    /// needs a registry entry or a deliberate exclusion.
     package static func findings(
         registry: [String: Any], targets: Set<String>, variantTargets: Set<String>
     ) -> [String] {
@@ -98,7 +107,19 @@ package enum CatalogCommand {
                 }
             }
         }
-        for variantTarget in variantTargets.sorted() where !namedTargets.contains(variantTarget) {
+        let unshipped = Set((registry["unshippedTargets"] as? [String]) ?? [])
+        for target in unshipped.sorted() {
+            if !targets.contains(target) {
+                findings.append("unshipped target '\(target)' names missing target")
+            } else if !variantTargets.contains(target) {
+                findings.append("unshipped target '\(target)' is not an engine variant")
+            }
+            if namedTargets.contains(target) {
+                findings.append("unshipped target '\(target)' is also registered as a variant")
+            }
+        }
+        for variantTarget in variantTargets.sorted()
+        where !namedTargets.contains(variantTarget) && !unshipped.contains(variantTarget) {
             findings.append("variant target '\(variantTarget)' has no registry entry")
         }
         return findings
