@@ -214,9 +214,19 @@ extension RealForwardRunner {
         } catch {
             // Any failure — cancellation, a GPU command-buffer error, an I/O
             // error mid-routed-fetch — may have written partial KV rows and
-            // left the chunk state dirty. Reset so the next request does not
-            // trip `chunkedRunnerDirty` on a stale in-flight chunk.
-            reset()
+            // left the chunk state dirty. Only *this* slot is suspect: the
+            // caller documents that and resets the slot for a batched session,
+            // so a whole-runner reset here wiped the other sequences' live KV
+            // and GDN state and made their next decode trip
+            // `prefillCursorMismatch` (AUD-0088). PLE and the QSA indexer are
+            // per-runner and only the whole-runner reset may clear them, so a
+            // single-slot runner keeps the old behaviour.
+            if let kv, kv.slots > 1 {
+                reset(slot: slot)
+                resetTransientState()
+            } else {
+                reset()
+            }
             throw error
         }
         if outputMode == .greedyIfAvailable, useFusedGreedyHead {
