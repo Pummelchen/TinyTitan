@@ -544,9 +544,7 @@ class FinishIsAtomicAndRepeatableTests(unittest.TestCase):
         writer.flush()
         writer.add("b", np.zeros((1, 1), np.float32))
         writer.flush()
-        (self.out / "model-00001.safetensors").rename(
-            self.out / "model-00001-of-00002.safetensors"
-        )
+        (self.out / "model-00001.safetensors").rename(self.out / "model-00001-of-00002.safetensors")
         writer.finish()
         self.assertEqual(
             sorted(p.name for p in self.out.glob("*.safetensors")),
@@ -566,8 +564,7 @@ class FinishIsAtomicAndRepeatableTests(unittest.TestCase):
         index.write_text('{"metadata": {"total_size": 4}, "weight_map": {"a"')
         writer.finish()
         document = json.loads(index.read_text())
-        self.assertIn(
-            "model.language_model.layers.0.mlp.gate.weight", document["weight_map"])
+        self.assertIn("model.language_model.layers.0.mlp.gate.weight", document["weight_map"])
         # Written beside and renamed, so no temporary is left behind.
         self.assertEqual(list(self.out.glob(".*index*")), [])
 
