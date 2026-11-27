@@ -100,10 +100,10 @@ public struct PLEConstants: Decodable, Sendable {
     /// `validate()` cannot be the only guard, because a `public` property cannot
     /// insist that some other method ran before it.
     ///
-    /// The layout is what the producer states, not an invention:
-    /// `tools/prepare_qwen38.py:148-152` appends the running total before adding
-    /// each head's size, so the offsets ascend by exactly the preceding
-    /// vocabulary from a zero base. A negative value, a zero vocabulary or a gap
+    /// The layout is what the producer states, not an invention: the converter
+    /// that produced it (retired with TT-142, 2026-11-27) appended the running
+    /// total before adding each head's size, so the offsets ascend by exactly
+    /// the preceding vocabulary from a zero base. A negative value, a zero vocabulary or a gap
     /// therefore means the file does not describe the table it claims to, and
     /// each reaches `PLEHash` differently: a zero trips its `vocabSizes > 0`
     /// precondition, and a negative survives that check as the bit-pattern giant

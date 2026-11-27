@@ -1,8 +1,8 @@
 // Provenance: 7.0 dense variant (plan task 5/7). The CPU forward is copied from
 // sources/TinyTitan/CPUEngine; the model-specific reasoning/sampling subsystem
 // is copied with it (a variant owns its model knowledge, spec §1.2). The loader
-// reads through the Core SSDAIManifestReader. Statics grounded in
-// tools/prepare_qwen35.py SIZES["4b"] (hidden 2560, 32 layers, tied output).
+// reads through the Core SSDAIManifestReader. Statics grounded in the retired
+// dense Qwen 3.5 converter's SIZES["4b"] (hidden 2560, 32 layers, tied output).
 import Foundation
 import TinyTitanCore
 

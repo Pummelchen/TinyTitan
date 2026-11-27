@@ -1,7 +1,8 @@
 import Foundation
 import TinyTitanCore
 
-/// The side-engine's view of a snapshot written by `tools/prepare_qwen35.py`.
+/// The side-engine's view of a snapshot written by the dense Qwen 3.5
+/// converter, which left the tree with TT-142 (2026-11-27).
 ///
 /// One directory: a `config.json` carrying the architecture and the
 /// quantization block, an index naming which shard holds what, and the

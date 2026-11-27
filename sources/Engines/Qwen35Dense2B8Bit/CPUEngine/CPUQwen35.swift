@@ -24,8 +24,9 @@ import TinyTitanCore
 /// waiting on the GPU — chooses: one while a client generation is in flight,
 /// four in the gaps.
 ///
-/// Correctness is defined by `tools/qwen35_reference.py`, which is checked
-/// in turn by continuations a 2B has no excuse for getting wrong.
+/// Correctness was defined by the dense Qwen 3.5 numpy reference, removed with
+/// TT-142 (2026-11-27); it was checked in turn by continuations a 2B has no
+/// excuse for getting wrong.
 public final class CPUQwen35 {
 
     public let snapshot: AffineSnapshot

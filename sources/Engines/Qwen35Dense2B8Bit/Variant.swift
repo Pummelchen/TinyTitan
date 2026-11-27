@@ -1,9 +1,10 @@
 // Provenance: template created 2026-11-14 against docs/plan-tinytitan-7-engine.md §3
 // (plan task 5, tracker row TT-076). The graph ported in task 7 is copied from
-// sources/TinyTitan/CPUEngine (commit recorded at copy time). Statics are grounded
-// in tools/prepare_qwen35.py SIZES["2b"] (hidden 2048, 24 layers, tied output) and
-// the dense family sampling row (GenerationDefaults.forFamily(.qwen35Dense)); the
-// dense trio has no ModelProfile row (tracker TT-072), so family defaults apply.
+// sources/TinyTitan/CPUEngine (commit recorded at copy time). Statics are
+// grounded in the retired dense Qwen 3.5 converter's SIZES["2b"] (hidden 2048,
+// 24 layers, tied output) and the dense family sampling row
+// (GenerationDefaults.forFamily(.qwen35Dense)); the dense trio has no
+// ModelProfile row (tracker TT-072), so family defaults apply.
 import Foundation
 import TinyTitanCore
 

@@ -268,8 +268,9 @@ extension RealForwardRunner {
         // A promoted projection has no scales or biases, and the quantized QMM
         // cannot read one: it would take the first k bytes of each 2k-byte bf16
         // row as 8-bit codes and multiply by scales read from offset 0.
-        // `prepare_qwen38.py` promotes index_q_proj and index_k_proj exactly
-        // that way for an 8-bit build, and decode already branches on dtype.
+        // The (now retired) Qwen3.8 converter promoted index_q_proj and
+        // index_k_proj exactly that way for an 8-bit build, and decode already
+        // branches on dtype.
         // One GEMV per row, the same shape the hyper-connection prefill
         // projections use.
         if key.dtype == 1 {
