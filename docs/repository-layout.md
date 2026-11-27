@@ -55,20 +55,23 @@ and it needs a decision recorded in the plan first.
 `sources/` holds one directory per SwiftPM target, and the name of the
 directory is the name of the target:
 
-- **`TinyTitan`** — the runtime: the model, the forward runner, the kernels, the
-  tokenizer. Subdirectories are *concerns*, not layers:
-  `Kernels/` (Swift dispatch over the shaders), `Metal/` (the `.metal`
-  sources), `Runtime/{Inference,Prefill,KVCache,Generation,Configuration,Family}`,
-  `Infrastructure/{ModelIO,Streaming,Metal}`, `CPUEngine/`, `Tokenization/`.
+- **`sources/Engines/`** — one target per shipped engine: `Ornith35B4Bit`,
+  `Inkling2GGUFQ4`, `Inkling2NVFP4`, the shared dense-GPU engine `DenseGPU`
+  and the six dense CPU variants (`Qwen35Dense{2B,4B,9B}{4,8}Bit`). Each is a
+  standalone plugin target (TPP/1) and imports only `TinyTitanCore`,
+  `TinyTitanFormat`, `TinyTitanPluginAPI`, the C kernels and system
+  frameworks. The old 6.x runtime and its `LegacyEngineAdapter` are gone:
+  no shipped family used them (TT-142, 2026-11-27).
 - **`TinyTitanLib`** — the library product: the supported facade (`Engine`,
   `Session`, their options, events, summary and errors) plus the generation
   orchestration it drives. No NIO and no HTTP: this is the target another Swift
   program depends on, and everything in it that is not the facade is `package`,
   so the promise stays small. See `docs/plan-embedded-library.md`.
 - **`TinyTitanVariants`** — the 7.0 engine-factory surface the library product
-  and the CLI share: the selection table, the variant factories (Ornith 35B
-  4-bit, the dense GPU engine, the six dense CPU variants) and
-  `routingFactory(directoryURL:)`, which picks one from an install's manifest.
+  and the CLI share: the plugin selection table, the variant factories (Ornith
+  35B 4-bit, the dense GPU engine, the six dense CPU variants) and
+  `routingFactory(directoryURL:)`, which resolves an install through the plugin
+  registry — an install no plugin claims is refused by name.
   It is a separate target so `TinyTitanLib` itself imports no engine module; the
   product `TinyTitanLib` carries both. See `docs/plan-embedded-library.md` §3.
 - **`TinyTitanCPUEngine`** — the dense CPU backend the server serves plus its
@@ -89,10 +92,9 @@ directory is the name of the target:
   text helpers, concurrency, hardware capabilities and process memory. It carries
   **no model knowledge** — the `core-purity` gate (`tools/lint.sh core-purity`)
   refuses a model name or a `ModelFamily`/`ModelProfile`/`ModelCatalog` reference
-  in it. The tokenizer cluster and the Metal context stay in `TinyTitan` until
-  their internal `GF*` coupling is split (tracker row TT-073). Variant targets
-  will live under `sources/Engines/<Variant>/` and import only this library and
-  the system frameworks — the `variant-isolation` gate
+  in it. It also carries the tokenizer cluster and the Metal context. Variant
+  targets live under `sources/Engines/<Variant>/` and import only this library
+  and the system frameworks — the `variant-isolation` gate
   (`tools/lint.sh variant-isolation`) refuses a cross-variant or runtime import.
   Both gates fail closed on an empty scan.
 - **`TinyTitanBench`, `TinyTitanValidation`, `TinyTitanKernelsC`** — the benchmark
@@ -117,22 +119,15 @@ were violated by exactly one file each and both violations were fixed in the
 ## Tests mirror sources
 
 `tests/<Target>/...` mirrors the target's own directory shape, so a test is
-found the same way the code is: `sources/Engines/Legacy6xRuntime/Runtime/Prefill/X.swift`
-is tested by `tests/Engines/Legacy6xRuntime/Runtime/Prefill/...`. Where a target
-has a `Core/` library half, the test path repeats it
-(`sources/TinyTitanServer/Core` ↔ `tests/TinyTitanServer/Core`).
+found the same way the code is: `sources/Engines/Ornith35B4Bit/Runtime/KVCache/X.swift`
+is tested by `tests/Engines/Ornith35B4Bit/...`. Where a target has a `Core/`
+library half, the test path repeats it (`sources/TinyTitanServer/Core` ↔
+`tests/TinyTitanServer/Core`).
 
-The 6.x runtime's test target moved with its code in TT-134 group (e): it was
-`tests/TinyTitan` (target `TinyTitanTests`) and is now
-`tests/Engines/Legacy6xRuntime` (target `Legacy6xRuntimeTests`), because the
-runtime itself is now `sources/Engines/Legacy6xRuntime`.
-
-`tests/Engines/Legacy6xRuntime/Runtime/qwen38_tensor_names.txt` and
-`tests/TinyTitanRepack/Core/Support/qwen38_tensor_names.txt` are byte-identical
-200 KB fixtures. **That duplication is required, not an oversight:** SwiftPM
-resources belong to one target, the two files are resources of two different
-test targets, and neither target may read the other's `Bundle.module`.
-Removing one means one suite silently loses its fixture, so leave them.
+`tests/TinyTitanRepack/Core/Support/qwen38_tensor_names.txt` is the repack
+suite's resource. Resources belong to one test target and may not read another
+target's `Bundle.module`; a second suite that needs the same bytes carries its
+own copy rather than a cross-target read.
 
 ## File size
 

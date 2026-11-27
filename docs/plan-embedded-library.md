@@ -132,8 +132,10 @@ and `Model` is not formally `Sendable` — several call sites use
 
 ```
 TinyTitanLib          the supported facade (public) + the orchestrator it drives (package)
-   └── TinyTitan        the runtime: TinyTitanFormat + TinyTitanKernelsC + the forward runner
-TinyTitanVariants     the 7.0 factory surface: selection table, variant factories,
+   └── TinyTitanCore   the generic library + TinyTitanFormat + TinyTitanKernelsC
+   └── Engine plugins  one standalone target per shipped model (Ornith35B4Bit,
+                      Inkling2GGUFQ4, Inkling2NVFP4); dense engines beside them
+TinyTitanVariants     the factory surface: plugin registry, variant factories,
                       dense CPU selection; shared by the CLI and the server
 TinyTitanCPUEngine    the dense CPU backend (`CPUModelBackend`) + the public
                       `CPUEngine` facade over the same `Session`
@@ -142,20 +144,20 @@ TinyTitanCLICore      the CLI, rebuilt ON TinyTitanLib (routes through TinyTitan
 TinyTitanC (optional) the C ABI: tinytitan.h over an opaque handle
 ```
 
-The runtime target keeps the name `TinyTitan` (the first draft called it
-`TinyTitanEngine`; renaming it would churn every import in the tree for no
-behavioural gain, and §9.5 is still open on naming). What matters is the layer
-above it: `TinyTitanLib` is a **product**, and the runtime is not — see
+There is no single runtime target any more. Each shipped model is its own
+engine plugin target under `sources/Engines/`, and the generic pieces they
+share live in `TinyTitanCore` and `TinyTitanFormat`. What matters is the layer
+above them: `TinyTitanLib` is a **product**, and the engines are not — see
 `docs/repository-layout.md`.
 
 - **Variant construction is a target, not a server detail.**
-  `TinyTitanVariants` holds the selection table and the variant factories, and
-  the `TinyTitanLib` *product* carries it beside `TinyTitanLib`,
-  `TinyTitanLegacyEngine` and `TinyTitanCPUEngine`. The facade target still imports no engine module; the
+  `TinyTitanVariants` holds the plugin registry and the variant factories, and
+  the `TinyTitanLib` *product* carries it beside `TinyTitanLib` and
+  `TinyTitanCPUEngine`. The facade target still imports no engine module; the
   CLI and an embedder both construct an engine through
-  `EngineFactories.routingFactory(directoryURL:)`, which reads the install's
-  manifest and returns the 7.0 variant where one ships, the 6.x factory
-  otherwise. The server's router uses the same table for the GPU path. The
+  `EngineFactories.routingFactory(directoryURL:)`, which resolves the install's
+  plugin from its manifest and refuses an install no plugin claims. The
+  server's router uses the same resolution for the GPU path. The
   dense CPU path is a second facade: `CPUEngine` in `TinyTitanCPUEngine` owns
   the `CPUModelBackend` the server serves and hands out the same `Session`;
   `EngineFactories.routingCPUFactory(directoryURL:)` selects the per-width
@@ -169,6 +171,20 @@ above it: `TinyTitanLib` is a **product**, and the runtime is not — see
   through the CLI — keep covering the new path byte-for-byte.
 - **No hidden globals.** The caller owns the `MTLDevice`; the engine owns its
   buffers and caches; two engines in one process must work (§5).
+
+
+### Decision 2026-11-27 (TT-142): the legacy adapter left the product
+
+The supported matrix is Ornith 1.5 35B-A3B 4-bit and the two Inkling 2 Mini
+installs (Q4_K_XL GGUF and NVFP4), each served by its own TPP/1 plugin. The 6.x
+runtime (`sources/Engines/Legacy6xRuntime`) and `TinyTitanLegacyEngine` served
+only families outside it, so both were deleted rather than carried in the
+product: an embedder linking `TinyTitanLib` no longer pays for an engine no
+supported model uses, and `TinyTitanVariants` no longer names it. The dense
+Qwen 3.5 engine (`DenseGPU`, the six `Qwen35Dense*`) stays; whether the public
+`CPUEngine` facade over it remains a product promise is this plan's slice (b),
+not part of the adapter removal. See `docs/plan-engine-plugins.md` for the
+matrix and the deletion inventory.
 
 ## 4. The API to freeze (v1 sketch)
 

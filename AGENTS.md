@@ -21,8 +21,8 @@ Poolside Laguna-S-2.1 118B-A8B at 4 and 8 bits through its decode probe. **The R
 is the authority on which checkpoints and widths are supported** — it changes more
 often than this file, so do not treat any list here as the current matrix.
 `Qwen 3.5 <size> <bits>` (keys `qwen35-2b/4b/9b`) are dense: no routed experts,
-nothing streamed from SSD. Ornith 1.5 8-bit is the default install and the default
-golden target; 6-bit is a withdrawn legacy format.
+nothing streamed from SSD. Ornith 1.5 4-bit is the shipped build and the default
+golden target; 8-bit is not shipped and 6-bit is a withdrawn legacy format.
 
 ## Working here
 
@@ -101,9 +101,10 @@ before reporting done:
 
 ## Layout and commands
 
-`sources/` holds one directory per SwiftPM target. `sources/Engines/Legacy6xRuntime/`
-is the 6.x runtime behind `LegacyEngineAdapter`; `sources/TinyTitanFormat/` plus
-`sources/TinyTitanKernelsC/` are its format types and C kernels. `sources/TinyTitanRepack/`, `sources/TinyTitanCLI/` and
+`sources/` holds one directory per SwiftPM target. `sources/Engines/` holds the
+shipped engine plugins (Ornith 1.5 4-bit, the two Inkling 2 Mini installs) and
+the dense engines; `sources/TinyTitanFormat/` plus
+`sources/TinyTitanKernelsC/` are the format types and C kernels. `sources/TinyTitanRepack/`, `sources/TinyTitanCLI/` and
 `sources/TinyTitanServer/` hold the installer, CLI and loopback server; each of
 those three is a thin executable over a `*Core` library target
 (`TinyTitanRepackCore`, `TinyTitanCLICore`, `TinyTitanServerCore`).
@@ -228,8 +229,8 @@ Rules that follow, and that need a decision recorded in
    tag; there is no second version to keep in step.
 
 **The product carries the factory surface.** `TinyTitanLib` the *product* names
-four targets: `TinyTitanLib`, `TinyTitanLegacyEngine`, `TinyTitanVariants` and
-`TinyTitanCPUEngine`. `TinyTitanVariants` is the 7.0 engine-factory surface —
+three targets: `TinyTitanLib`, `TinyTitanVariants` and
+`TinyTitanCPUEngine` (beside `TinyTitanCore` and `TinyTitanPluginAPI`). `TinyTitanVariants` is the 7.0 engine-factory surface —
 the selection table, the variant factories and the dense CPU selection — and it
 is a separate target precisely so that `TinyTitanLib` itself still imports no
 engine module while the CLI and an embedder can construct a variant engine. A single-model front end calls
@@ -245,9 +246,10 @@ in, importing only the plugin API, `TinyTitanCore` and system frameworks, with
 all its tuning and customization inside it. The host resolves an install only
 through `PluginRegistry` (`EngineFactories.pluginRegistry`). The spec is
 `docs/plugin-api-v1.md`, and `sources/Plugins/TemplatePlugin` is the golden base
-a new plugin is copied from. Engines not yet migrated run behind labelled
-adapters in `TinyTitanVariants` until their plugin lands (TT-132); the
-`variant-isolation` gate also holds `sources/Plugins/` to the plugin rule.
+a new plugin is copied from. Every shipped family is a plugin; there is no
+fallback adapter, and an install no plugin claims is refused by name
+(TT-142, 2026-11-27). The `variant-isolation` gate also holds
+`sources/Plugins/` to the plugin rule.
 
 ## Models
 
@@ -356,7 +358,7 @@ linters:
   input.
 - `func-length` — no function over 120 lines without an inline `lint:allow-long
   <reason>`. The ratchet file `tools/func-length-baseline.txt` carries the
-  audited exemptions (21 rows: 13 from the formatter sweep that expanded
+  audited exemptions (17 rows: 9 from the formatter sweep that expanded
   their bodies, and 8 verbatim copies of >120-line engine functions into the
   shipped GPU variant and the shared dense-GPU variant — 7.0 duplication,
   spec §1.2; the as-is GGUF decoder's AUD-025 row was dropped when its
@@ -377,7 +379,7 @@ linters:
   at nothing on a newer toolchain or at a stale binary on this one.
 - `stdout-clean` — no `print`, `debugPrint` or `standardOutput` write anywhere in
   the target closure `Package.swift` gives the `TinyTitanLib` **product** — the
-  facade plus `TinyTitanLegacyEngine`, `TinyTitanVariants` and
+  facade plus `TinyTitanVariants` and
   `TinyTitanCPUEngine` — resolved from the manifest rather than listed, so a
   target added to the product enters the gate on the commit it enters the
   library. `library-facade` already holds rule 1 over the
@@ -451,8 +453,9 @@ than skipping.
 `tools/golden-baseline.sh --check <target>` compares greedy, fixed-seed generation
 against `benchmark/golden/`. It is the only check that exercises real inference, so
 run it for any change to the runtime or the model-load path — the unit tests never
-load a model. Ornith 1.5 8-bit (`8`) is the default target; bare `4` still means
-Ornith 1.5 4-bit. It counts as a model run: apply the preconditions above first. A
+load a model. `ornith-4` (bare `4`) is the default target and the only Ornith
+one the shipped matrix has; `inkling2-gguf-q4` and `inkling2-nvfp4` are the
+other two. It counts as a model run: apply the preconditions above first. A
 baseline is valid for one (machine, build, model) triple; re-capture only for a
 deliberate numerics change, never to make a mismatch go away.
 

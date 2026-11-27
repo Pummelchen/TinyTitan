@@ -1,10 +1,10 @@
 # Engine plugins: TinyTitan Plugin Protocol v1
 
 Status: **design, 2026-11-24; TPP/1.0 implemented (TT-130)**: the API target,
-the registry, the template plugin and the Inkling 2 Q4 plugin. The
-specification is `docs/plugin-api-v1.md`. Tracker: TT-130 (protocol and
-host), TT-131 (conformance kit), TT-132 (migrate the shipped engines), TT-133
-(out-of-tree plugins).
+the registry, the template plugin and a plugin for every shipped family
+(TT-142, 2026-11-27). The specification is `docs/plugin-api-v1.md`. Tracker:
+TT-130 (protocol and host), TT-131 (conformance kit), TT-132 (migrate the
+shipped engines), TT-133 (out-of-tree plugins).
 
 ## Goal
 
@@ -418,11 +418,44 @@ The order is chosen so each step is shippable and bit-identical:
        `ManagedModelBackend` (`PreadExpertStreamer`, `ResidentBuffer`),
        `ServerCoordinator` (`ForwardStepGate`), and the bench's kernel
        benchmarks.
-   - Done when no host or plugin target imports `TinyTitan` (6.x) and the
-     6.x adapter is gone.
+   - Done 2026-11-27 (TT-142): no host or plugin target imports the 6.x
+     runtime; the runtime and its adapter are deleted. See the decision below.
 
 Each step is gated by the full lint set, the unit suites, the golden baselines
 of every installed model, and api-feature-check 10/10 on the engines it touches.
+
+## Decision 2026-11-27 (TT-142): the 6.x runtime and adapter leave the product
+
+The shipped matrix is exactly three installs, and every one of them is served
+by its own TPP/1 plugin:
+
+| Shipped model | Width | Plugin |
+|---|---|---|
+| Ornith 1.5 35B-A3B | 4-bit | `Ornith35B4BitPlugin` |
+| Inkling 2 Mini (Q4_K_XL GGUF) | Q4 | `Inkling2GGUFQ4Plugin` |
+| Inkling 2 Mini (NVFP4 checkpoint) | NVFP4 | `Inkling2NVFP4Plugin` |
+
+The 6.x MoE runtime (`sources/Engines/Legacy6xRuntime`, 279 files) and
+`TinyTitanLegacyEngine` (8 files) served only families outside that matrix —
+Qwen 3.8 Flash Next, Qwen 3.6/Ornith 8-bit, KAT-Coder, AgentWorld, Laguna and
+the GGUF as-is route. They were kept as the phase-2 porting surface on the
+assumption that a family would migrate off them; instead every shipped family
+gained a plugin, so the runtime had no supported caller left. It was deleted
+whole rather than migrated: porting it would have preserved code for models
+this project does not support, which is the drift TT-142 exists to remove.
+
+The adapter was also the registry's fallback (`MatchStrength.fallback`). With
+it gone there is no fallback engine: `PluginRegistry.resolve` throws
+`noPlugin` for an install no plugin claims, and the catalog, doctor, CLI and
+server report that refusal by name instead of loading an engine for an
+unsupported family. Supported routes are unchanged — they were already served
+by their plugins — and the full suite plus the 19 lint gates are the check.
+
+Delete-only sibling: `TinyTitanLib/LegacyRuntimeBoundaryTests` pinned the
+adapter boundary; with no importers there is nothing to pin, and the compiler
+is the gate. The dense Qwen 3.5 engine code (`DenseGPU` and the six
+`Qwen35Dense*`) is **not** part of this decision: it remains shipped code whose
+library surface is TT-142 slice (b).
 
 ## Risks and open questions
 
@@ -432,9 +465,8 @@ of every installed model, and api-feature-check 10/10 on the engines it touches.
   the golden and paired benchmarks of step 1 catch it.
 - **Batched decode across plugins.** `produceBatch` is per runner, so batching
   stays within one model; cross-model batching is out of scope.
-- **The 6.x engine as one plugin.** It serves several families; it registers one
-  plugin with a probe per family it still owns, until those families have
-  their own plugins.
+- **The 6.x engine as one plugin — closed 2026-11-27.** No shipped family used
+  it, so it was deleted rather than migrated into a plugin (TT-142).
 - **Who owns a manifest family.** Two plugins may claim `inkling2`, for the Q4
   and NVFP4 installs; `probe` keys on quant scheme as well, and a tie is an
   error by design.

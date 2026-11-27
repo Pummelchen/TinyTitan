@@ -316,7 +316,7 @@ If the log shows this, **no golden was compared**:
 refusing to start: these processes match the model-process guard
   91687 .../swiftpm-testing-helper --test-bundle-path .../WebTransport...
 stop them yourself, or re-run when they are gone. This script never terminates a process it did not start.
-error: golden baseline mismatch (qwen38-4)
+error: golden baseline mismatch (ornith-4)
 ```
 
 `release.sh` reports the refusal as `golden baseline mismatch (<target>)`,
@@ -374,8 +374,8 @@ says out loud which ones it could not check:
 
 ```
   -- NOT CHECKED golden baseline ornith-4 (ornith-1.5_35B_A3B_4Bit): no install under models/
-  4 golden baseline(s) identical
-  NOT CHECKED — no install in models/, and none may be fetched to fix that: ornith-8 ornith-4 qwen36-4 qwen36-8 agentworld-4 agentworld-8
+  2 golden baseline(s) identical
+  NOT CHECKED — no install in models/, and none may be fetched to fix that: ornith-4 inkling2-gguf-q4 inkling2-nvfp4
   the release notes must name every baseline that was not checked
 ```
 

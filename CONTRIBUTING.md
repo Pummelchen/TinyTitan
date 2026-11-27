@@ -34,7 +34,7 @@ change:
   without a reason fails exactly like no marker.
 - **func-length** — a ratchet, not a limit: no function over 120 lines without an
   inline `lint:allow-long <reason>` above it. The ratchet file
-  `tools/func-length-baseline.txt` carries the audited exemptions (21 rows: 13
+  `tools/func-length-baseline.txt` carries the audited exemptions (17 rows: 9
   from the formatter sweep that expanded their bodies, and 8 verbatim copies of
   those audited functions into the shipped GPU variant and the shared dense-GPU
   variant under the 7.0
