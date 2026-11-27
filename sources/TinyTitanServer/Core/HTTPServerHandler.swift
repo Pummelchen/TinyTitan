@@ -140,11 +140,15 @@ final class ServerHTTPHandler: ChannelInboundHandler, @unchecked Sendable {
             // in order rather than mid-upload.
             if Self.headerBlockExceedsLimits(head.headers) {
                 rejected = true
+                // Answered before `inFlightRequests` is incremented, so this
+                // response must not decrement it: with a pipelined neighbour in
+                // flight the decrement would take that request's count (AUD-0066).
                 writeError(
                     context, status: .requestHeaderFieldsTooLarge,
                     OpenAIErrorEnvelope(
                         message: "request headers are too large",
-                        code: "request_headers_too_large"))
+                        code: "request_headers_too_large"),
+                    completesRequest: false)
                 return
             }
             // S10/S25: reset per-request phase state and drop the reference to

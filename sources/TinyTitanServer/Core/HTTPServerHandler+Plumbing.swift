@@ -67,9 +67,15 @@ extension ServerHTTPHandler {
             }
         }
         let close = outbox.closeWhenDrained
+        // An abandoned outbox belongs to a request that was refused before its
+        // stream head existed: the ordinary response writer ends that request and
+        // decrements its count. Decrementing here too took the *next* pipelined
+        // request's count, which is how a generating request lost the
+        // never-close-mid-generation rule (AUD-0066).
+        let completesRequest = !outbox.isAbandoned
         let contextBox = SendableContext(context)
         context.eventLoop.execute {
-            if self.inFlightRequests > 0 { self.inFlightRequests -= 1 }
+            if completesRequest, self.inFlightRequests > 0 { self.inFlightRequests -= 1 }
             self.resetIdleDeadline(contextBox.value)
             if close || endWriteFailed {
                 contextBox.value.close(promise: nil)
@@ -111,7 +117,8 @@ extension ServerHTTPHandler {
 
     func writeHeadOnly(
         _ context: ChannelHandlerContext,
-        status: HTTPResponseStatus
+        status: HTTPResponseStatus,
+        completesRequest: Bool = true
     ) {
         let contextBox = SendableContext(context)
         context.eventLoop.execute {
@@ -127,7 +134,7 @@ extension ServerHTTPHandler {
             contextBox.value.writeAndFlush(self.wrapOutboundOut(.end(nil))).whenFailure { _ in
                 contextBox.value.close(promise: nil)
             }
-            if self.inFlightRequests > 0 { self.inFlightRequests -= 1 }
+            if completesRequest, self.inFlightRequests > 0 { self.inFlightRequests -= 1 }
             self.resetIdleDeadline(contextBox.value)
         }
     }
@@ -136,23 +143,30 @@ extension ServerHTTPHandler {
         _ context: ChannelHandlerContext,
         status: HTTPResponseStatus,
         _ value: T,
-        extraHeaders: [(String, String)] = []
+        extraHeaders: [(String, String)] = [],
+        completesRequest: Bool = true
     ) {
         guard let data = try? JSONEncoder().encode(value) else {
             // S5: encoding failure must not silently drop the response; send a
             // minimal error envelope instead.
-            writeData(context, status: .internalServerError, data: Self.minimalErrorData)
+            writeData(
+                context, status: .internalServerError, data: Self.minimalErrorData,
+                completesRequest: completesRequest)
             return
         }
-        writeData(context, status: status, data: data, extraHeaders: extraHeaders)
+        writeData(
+            context, status: status, data: data, extraHeaders: extraHeaders,
+            completesRequest: completesRequest)
     }
 
     func writeError(
         _ context: ChannelHandlerContext,
         status: HTTPResponseStatus,
-        _ error: OpenAIErrorEnvelope
+        _ error: OpenAIErrorEnvelope,
+        completesRequest: Bool = true
     ) {
-        writeCodable(context, status: status, error)
+        writeCodable(
+            context, status: status, error, completesRequest: completesRequest)
     }
 
     func writeJSON(
@@ -167,11 +181,19 @@ extension ServerHTTPHandler {
         writeData(context, status: status, data: data)
     }
 
+    /// Write a complete response.
+    ///
+    /// `completesRequest` says whether this response ends a request that was
+    /// counted in `inFlightRequests`. It is true for every response to a routed
+    /// request and false for the one rejection that happens *before* the count
+    /// is incremented (an oversized header block): that decrement would take a
+    /// pipelined neighbour's count instead of its own (AUD-0066).
     func writeData(
         _ context: ChannelHandlerContext,
         status: HTTPResponseStatus,
         data: Data,
-        extraHeaders: [(String, String)] = []
+        extraHeaders: [(String, String)] = [],
+        completesRequest: Bool = true
     ) {
         let contextBox = SendableContext(context)
         context.eventLoop.execute {
@@ -195,7 +217,7 @@ extension ServerHTTPHandler {
             contextBox.value.writeAndFlush(self.wrapOutboundOut(.end(nil))).whenFailure { _ in
                 contextBox.value.close(promise: nil)
             }
-            if self.inFlightRequests > 0 { self.inFlightRequests -= 1 }
+            if completesRequest, self.inFlightRequests > 0 { self.inFlightRequests -= 1 }
             self.resetIdleDeadline(contextBox.value)
         }
     }

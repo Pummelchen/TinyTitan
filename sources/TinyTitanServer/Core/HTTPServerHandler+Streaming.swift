@@ -149,6 +149,17 @@ extension ServerHTTPHandler {
         if error is CancellationError {
             // S20: the client disconnected or the server is shutting down;
             // there is no one to write to. Do not emit a misleading 500.
+            //
+            // Nothing else ends this request: the stream branch above returned
+            // before writing, and an abandoned outbox no longer decrements. The
+            // count has to come off here, or the connection carries a phantom
+            // in-flight request forever and its idle deadline keeps re-arming
+            // (AUD-0066).
+            let contextBox = SendableContext(context)
+            context.eventLoop.execute {
+                if self.inFlightRequests > 0 { self.inFlightRequests -= 1 }
+                self.resetIdleDeadline(contextBox.value)
+            }
             return
         }
         if let requestError = error as? ServerRequestError {
