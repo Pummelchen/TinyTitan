@@ -2,12 +2,12 @@ import Foundation
 import Metal
 import TinyTitanCore
 
-/// K2-Horizon's input and output ends: the embedding lookup, the grouped final
-/// norm and the untied `lm_head` GEMV.
+/// A probe graph's input and output ends: the embedding lookup, the grouped
+/// final norm and the untied `lm_head` GEMV.
 ///
 /// The layer loop needs both ends before it can produce a first token; keeping
-/// them together also makes the scale convention (K2's embedding is not
-/// multiplied by `sqrt(hidden)`) a single readable place.
+/// them together also makes the embedding-scale convention (this path does not
+/// multiply by `sqrt(hidden)`) a single readable place.
 final class K2Head {
     private let config: ArchConfig
     private let model: Model
@@ -39,12 +39,12 @@ final class K2Head {
             }
             return buffer
         }
-        self.normed = try buffer(config.hiddenSize, "k2.head.normed")
-        self.logits = try buffer(config.vocabSize, "k2.head.logits")
+        self.normed = try buffer(config.hiddenSize, "probe.head.normed")
+        self.logits = try buffer(config.vocabSize, "probe.head.logits")
     }
 
-    /// Embedding lookup into `out` (`hiddenSize` halfs). K2 does not scale the
-    /// embedding by `sqrt(hidden)`.
+    /// Embedding lookup into `out` (`hiddenSize` halfs). This path does not
+    /// scale the embedding by `sqrt(hidden)`.
     func encodeEmbedding(
         commandBuffer: MTLCommandBuffer,
         tokenID: UInt32,

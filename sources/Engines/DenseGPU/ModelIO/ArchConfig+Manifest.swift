@@ -84,7 +84,7 @@ extension ArchConfig {
         // The families without a preset whose architecture is fully declared by
         // the manifest. Anything else keeps the previous behaviour: refused by
         // name, because there is no preset to load it at.
-        guard family == .qwen35Dense || family == .k2Horizon else {
+        guard family == .qwen35Dense else {
             throw ArchResolutionError.unsupportedFamily(family.rawValue)
         }
         // `read`, not `load`: this is precisely the case `load` cannot serve --
@@ -202,8 +202,8 @@ extension ArchConfig {
             hyperConnections: hyperConnections,
             sparseIndexer: sparseIndexer,
             ple: ple,
-            // K2 normalizes the selected sigmoid scores over the top-k
-            // (`norm_topk_prob` is true in its config). See `layerShape`.
+            // Whether the router normalizes over the top-k is declared per
+            // install (`norm_topk_prob`). See `layerShape`.
             routerNormTopK: shape.routerNormTopK,
             quantGroupSize: arch.quantGroupSize ?? 64,
             normGroups: shape.normGroups,
@@ -214,11 +214,11 @@ extension ArchConfig {
             mova: shape.mova)
     }
 
-    /// The family-dependent layer shape a manifest declares (K2's block).
+    /// The family-dependent layer shape a manifest declares.
     ///
-    /// Split out of `from` under the 120-line gate. K2 requires every field by
-    /// name; a family without them reads what it declares and defaults the
-    /// rest, which keeps the dense manifests loading unchanged.
+    /// Split out of `from` under the 120-line gate. A family that declares
+    /// these reads them by name; one that does not reads what it declares and
+    /// defaults the rest, which keeps the dense manifests loading unchanged.
     private struct ManifestLayerShape {
         let attentionGate: AttentionGateFunction
         let normGroups: Int
@@ -233,36 +233,27 @@ extension ArchConfig {
         manifest arch: ManifestArch,
         family: ModelFamily
     ) throws -> ManifestLayerShape {
-        func required<T>(_ value: T?, _ field: String) throws -> T {
-            guard let value else {
-                throw ArchResolutionError.manifestOmitsField(
-                    family: family.rawValue, field: field)
-            }
-            return value
-        }
-        let isK2 = family == .k2Horizon
         let isFlash = family == .qwen4flash || family == .qwen4flashMTP
         func extensionValue<T>(
-            _ value: T?, _ field: String, default fallback: @autoclosure () -> T
-        ) throws -> T {
-            if isK2 { return try required(value, field) }
-            return value ?? fallback()
+            _ value: T?, default fallback: @autoclosure () -> T
+        ) -> T {
+            value ?? fallback()
         }
-        let gateName = try extensionValue(
-            arch.attentionGate, "attentionGate", default: "sigmoid")
+        let gateName = extensionValue(
+            arch.attentionGate, default: "sigmoid")
         guard let attentionGate = AttentionGateFunction(rawValue: gateName) else {
             throw ArchResolutionError.manifestDeclaresInvalidValue(
                 family: family.rawValue, field: "attentionGate", value: gateName)
         }
-        let normGroups = try extensionValue(
-            arch.normGroups, "normGroups", default: 1)
+        let normGroups = extensionValue(
+            arch.normGroups, default: 1)
         guard normGroups > 0, arch.hiddenSize % normGroups == 0 else {
             throw ArchResolutionError.manifestDeclaresInvalidValue(
                 family: family.rawValue, field: "normGroups",
                 value: "\(normGroups) (hiddenSize \(arch.hiddenSize))")
         }
-        let denseLayerIndices = try extensionValue(
-            arch.denseLayerIndices, "denseLayerIndices", default: [])
+        let denseLayerIndices = extensionValue(
+            arch.denseLayerIndices, default: [])
         guard denseLayerIndices.allSatisfy({ $0 >= 0 && $0 < arch.numLayers }),
             Set(denseLayerIndices).count == denseLayerIndices.count,
             denseLayerIndices == denseLayerIndices.sorted()
@@ -272,39 +263,28 @@ extension ArchConfig {
                 value: "\(denseLayerIndices)")
         }
         let mova = MoVAConfig(
-            numExperts: try extensionValue(
-                arch.movaNumExperts, "movaNumExperts", default: 0),
-            topKExperts: try extensionValue(
-                arch.movaTopKExperts, "movaTopKExperts", default: 0),
-            routerScaling: try extensionValue(
-                arch.movaRouterScaling, "movaRouterScaling", default: 1),
-            routerHasBias: try extensionValue(
-                arch.movaRouterHasBias, "movaRouterHasBias", default: false),
-            activation: try extensionValue(
-                arch.movaActivation, "movaActivation", default: "silu"))
-        if isK2 {
-            guard mova.numExperts > 0, mova.topKExperts > 0,
-                mova.topKExperts <= mova.numExperts
-            else {
-                throw ArchResolutionError.manifestDeclaresInvalidValue(
-                    family: family.rawValue, field: "movaNumExperts/topK",
-                    value: "\(mova.numExperts)/\(mova.topKExperts)")
-            }
-        }
+            numExperts: extensionValue(
+                arch.movaNumExperts, default: 0),
+            topKExperts: extensionValue(
+                arch.movaTopKExperts, default: 0),
+            routerScaling: extensionValue(
+                arch.movaRouterScaling, default: 1),
+            routerHasBias: extensionValue(
+                arch.movaRouterHasBias, default: false),
+            activation: extensionValue(
+                arch.movaActivation, default: "silu"))
         return ManifestLayerShape(
             attentionGate: attentionGate,
             normGroups: normGroups,
             denseLayerIndices: denseLayerIndices,
             mova: mova,
-            routerHasBias: try extensionValue(
-                arch.routerHasBias, "routerHasBias", default: false),
-            routerScaling: try extensionValue(
-                arch.routerScaling, "routerScaling", default: 1),
-            // K2 normalizes the selected sigmoid scores over the top-k
-            // (`norm_topk_prob` is true in its config). The field was not
-            // written into older K2 manifests, and defaulting it to false would
-            // hand the router unnormalized scores -- a fluent, wrong mixture
-            // rather than an error. An explicit declaration still wins.
-            routerNormTopK: arch.routerNormTopK ?? (isK2 || isFlash))
+            routerHasBias: extensionValue(
+                arch.routerHasBias, default: false),
+            routerScaling: extensionValue(
+                arch.routerScaling, default: 1),
+            // The norm-over-top-k field is declared per install; when it is
+            // absent only the flash families default it on. An explicit
+            // declaration always wins.
+            routerNormTopK: arch.routerNormTopK ?? isFlash)
     }
 }

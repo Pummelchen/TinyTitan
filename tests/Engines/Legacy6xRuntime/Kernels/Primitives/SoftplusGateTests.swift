@@ -6,7 +6,7 @@ import TinyTitanValidationSupport
 @testable import Legacy6xRuntime
 @testable import TinyTitanCore
 
-/// K2-Horizon's attention output gate is `softplus(x; beta = ln 2)`, not the
+/// The beta-scaled attention output gate is `softplus(x; beta = ln 2)`, not the
 /// sigmoid the Qwen families use. The two curves are both smooth, positive and
 /// bounded, so reading one as the other is a wrong model that answers fluently;
 /// this pins the checkpoint's formula.
@@ -36,7 +36,7 @@ import TinyTitanValidationSupport
     }
 
     @Test func matchesTheCheckpointFormulaAtBothTails() throws {
-        var rng = SeedTree(0x5F7_1CE).key("k2-softplus-gate")
+        var rng = SeedTree(0x5F7_1CE).key("softplus-gate")
         let gate = (0..<256).map { _ in rng.uniform(-6, 6) }
         let out = (0..<256).map { _ in rng.uniform(-2, 2) }
         // The reference reads the same rounded inputs the kernel does.

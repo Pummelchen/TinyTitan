@@ -72,7 +72,7 @@ enum SSDAIJSON {
 
     /// The `arch` object, including the family extension fields.
     ///
-    /// Split out of `encodeManifest` when K2's ten keys took that body past the
+    /// Split out of `encodeManifest` when the family keys took that body past the
     /// 120-line gate. The extension blocks are the part that grows with each
     /// new family, so they live together rather than lengthening the document
     /// assembly.
@@ -144,26 +144,6 @@ enum SSDAIJSON {
             archDict["pleVocabDivisor"] = arch.pleVocabDivisor
             archDict["routerNormTopK"] = arch.routerNormTopK
             archDict["quantGroupSize"] = arch.quantGroupSize
-        }
-        if arch.family == .k2Horizon {
-            // K2's layer shape: the MoVA expert set, the grouped norm, the
-            // attention gate function, the router's selection bias and
-            // scaling, and which layers are dense.
-            archDict["movaNumExperts"] = arch.movaNumExperts
-            archDict["movaTopKExperts"] = arch.movaTopKExperts
-            archDict["normGroups"] = arch.normGroups
-            archDict["attentionGate"] = arch.attentionGate
-            archDict["routerScaling"] = arch.routerScaling
-            archDict["routerHasBias"] = arch.routerHasBias
-            archDict["movaRouterScaling"] = arch.movaRouterScaling
-            archDict["movaRouterHasBias"] = arch.movaRouterHasBias
-            archDict["movaActivation"] = arch.movaActivation
-            archDict["denseLayerIndices"] = arch.denseLayerIndices
-            // Not part of the K2 block until now, and the reader's fallback is
-            // false for every other family: a K2 install would have normalized
-            // nothing. It belongs here because K2's config states
-            // `norm_topk_prob: true`; write it so the manifest says it too.
-            archDict["routerNormTopK"] = arch.routerNormTopK
         }
         if let geometry = arch.variantGeometry {
             archDict["variantGeometry"] = [

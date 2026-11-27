@@ -257,7 +257,7 @@ public final class MetalContext: @unchecked Sendable {
             name: name,
             constants: sortedConstants,
             maxTotalThreadsPerThreadgroup: hint)
-        // K2: compile+insert happen inside the lock. The naive double-checked
+        // Compile+insert happen inside the lock. The naive double-checked
         // locking compiled the PSO *outside* the lock, so a concurrent miss on
         // the same key compiled the pipeline multiple times. Compiling under
         // the lock serializes only the (rare, startup-only) cold-miss path;

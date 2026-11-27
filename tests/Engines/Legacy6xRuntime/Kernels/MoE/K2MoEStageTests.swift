@@ -6,7 +6,7 @@ import TinyTitanValidationSupport
 @testable import Legacy6xRuntime
 @testable import TinyTitanCore
 
-/// K2's sparse expert block on synthetic weights: bf16 router, sigmoid top-k
+/// The sparse expert block on synthetic weights: bf16 router, sigmoid top-k
 /// selection with a ranking-only bias, the selected SwiGLU experts and the
 /// always-on shared expert. The reference is the CPU formula with the same
 /// 4-bit packing the runtime reads.
@@ -100,7 +100,7 @@ import TinyTitanValidationSupport
     private static func sigmoid(_ x: Float) -> Float { 1 / (1 + exp(-x)) }
 
     @Test func selectedExpertsAndSharedMatchTheReference() throws {
-        var rng = SeedTree(0x30E_1A2B).key("k2-moe-stage")
+        var rng = SeedTree(0x30E_1A2B).key("sparse-moe-stage")
         let ctx = try MetalContext()
         let x = (0..<Self.hidden).map { _ in Float16(rng.uniform(-1, 1)) }
         let xFloat = x.map(Float.init)

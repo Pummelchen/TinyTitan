@@ -17,10 +17,6 @@ struct ReasoningControlTests {
             ModelFamily.qwen38flash.reasoningControl
                 == .thinkingWithEffortLevels(
                     defaultEffort: .xhigh, supported: [.low, .medium, .xhigh]))
-        #expect(
-            ModelFamily.k2Horizon.reasoningControl
-                == .effortOnly(
-                    defaultEffort: .high, supported: [.low, .medium, .high]))
     }
 
     @Test("Nil effort always validates")
@@ -87,7 +83,7 @@ struct ReasoningControlTests {
     // MARK: Thinking levels
 
     @Test("Each family offers exactly the levels its template renders")
-    func supportedLevels() {
+    func supportedLevels() throws {
         #expect(ModelFamily.qwen36.supportedReasoningLevels == [.off, .on])
         #expect(ModelFamily.qwen36MTP.supportedReasoningLevels == [.off, .on])
         #expect(
@@ -96,16 +92,21 @@ struct ReasoningControlTests {
         #expect(
             ModelFamily.qwen38flashMTP.supportedReasoningLevels
                 == [.off, .low, .medium, .xhigh])
-        #expect(
-            ModelFamily.k2Horizon.supportedReasoningLevels
-                == [.low, .medium, .high])
+        // The effort-only control has no family behind it any more, but the
+        // shape stays in the shared contract for a template with no
+        // thinking-off prompt.
+        let effortOnly = ModelReasoningControl.effortOnly(
+            defaultEffort: .high, supported: [.low, .medium, .high])
+        #expect(effortOnly.supportedLevels == [.low, .medium, .high])
+        #expect(effortOnly.levelWhenOn == .high)
+        #expect(effortOnly.effectiveEffort(thinkingMode: .on, effort: nil) == .high)
         #expect(CPUModelFamily.qwen35Dense.supportedReasoningLevels == [.off, .on])
     }
 
-    /// The two effort families do not accept each other's levels: Qwen3.8
-    /// raises on `high`, K2 raises on `xhigh`. A shared enum plus a per-family
-    /// list is what keeps that from becoming a template exception at runtime.
-    @Test("Each effort family rejects the other's level")
+    /// The effort families do not accept each other's levels: Qwen3.8 raises
+    /// on `high`. A shared enum plus a per-family list is what keeps that from
+    /// becoming a template exception at runtime.
+    @Test("Each effort family rejects a level it does not render")
     func effortSetsAreNotInterchangeable() {
         #expect(
             throws: ModelReasoningControlError.effortUnsupported(
@@ -114,27 +115,6 @@ struct ReasoningControlTests {
             try ModelFamily.qwen38flash.validateReasoning(
                 thinkingMode: .on, effort: .high)
         }
-        #expect(
-            throws: ModelReasoningControlError.effortUnsupported(
-                family: .k2Horizon, effort: .xhigh)
-        ) {
-            try ModelFamily.k2Horizon.validateReasoning(
-                thinkingMode: .on, effort: .xhigh)
-        }
-        for effort in [ModelReasoningEffort.low, .medium, .high] {
-            #expect(throws: Never.self) {
-                try ModelFamily.k2Horizon.validateReasoning(
-                    thinkingMode: .on, effort: effort)
-            }
-        }
-        // K2 has no thinking-off prompt at all, even without an effort.
-        #expect(
-            throws: ModelReasoningControlError.thinkingRequired(family: .k2Horizon)
-        ) {
-            try ModelFamily.k2Horizon.validateReasoning(
-                thinkingMode: .off, effort: nil)
-        }
-        #expect(!ModelFamily.k2Horizon.supportsThinkingOff)
         #expect(ModelFamily.qwen38flash.supportsThinkingOff)
     }
 
@@ -164,7 +144,7 @@ struct ReasoningControlTests {
     func mappedSettingsValidate() throws {
         for family in [
             ModelFamily.qwen36, .qwen36MTP, .qwen38flash,
-            .qwen38flashMTP, .k2Horizon,
+            .qwen38flashMTP,
         ] {
             for level in family.supportedReasoningLevels {
                 let settings = try family.runtimeReasoning(for: level)

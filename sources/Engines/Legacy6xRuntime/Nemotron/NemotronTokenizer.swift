@@ -2,13 +2,13 @@ import Foundation
 import Tokenizers
 import TinyTitanCore
 
-/// The checkpoint's own tokenizer, loaded without TinyTitan's ChatML/K2
-/// dialect resolver.
+/// The checkpoint's own tokenizer, loaded without TinyTitan's dialect
+/// resolver.
 ///
-/// `GFTokenizer` requires `<|endoftext|>` for ChatML and `<|ifm|im_start|>` for
-/// K2; Nemotron writes `<|im_start|>`/`<|im_end|>` but has no
-/// `<|endoftext|>`, so neither dialect fits and its check refuses the model's
-/// own tokenizer. This wrapper uses `AutoTokenizer` and the checkpoint's
+/// `GFTokenizer` requires `<|endoftext|>` for ChatML; Nemotron writes
+/// `<|im_start|>`/`<|im_end|>` but has no `<|endoftext|>`, so that dialect does
+/// not fit and its check refuses the model's own tokenizer. This wrapper uses
+/// `AutoTokenizer` and the checkpoint's
 /// `chat_template.jinja` directly, which is the whole contract this model
 /// needs: render the template, encode, decode.
 public final class NemotronTokenizer {

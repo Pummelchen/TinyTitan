@@ -56,7 +56,7 @@ void sigmoid_gate_mul_fp16(
     out[tid] = half(float(out[tid]) / (1.0f + exp(-g)));
 }
 
-// out[i] *= softplus(gate[i]; beta = ln 2) — K2-Horizon's full-attention gate.
+// out[i] *= softplus(gate[i]; beta = ln 2) — a beta-scaled attention gate.
 //
 // softplus(x; beta) = log(1 + exp(beta*x)) / beta, evaluated in the
 // overflow-safe branch. At beta = ln 2 this is log2(1 + 2^x), which is what
@@ -80,8 +80,8 @@ void softplus_gate_mul_fp16(
 // out[i] *= softplus(gate[i / head_dim]) — Laguna-S-2.1's per-head gate.
 //
 // One gate value per query head, broadcast across that head's head_dim
-// channels. Plain softplus log(1 + exp(x)), not K2's beta = ln 2 form: the
-// checkpoints differ and the gate is applied before o_proj in both.
+// channels. Plain softplus log(1 + exp(x)), not the beta = ln 2 form above:
+// the checkpoints differ and the gate is applied before o_proj in both.
 [[kernel, max_total_threads_per_threadgroup(256)]]
 void softplus_gate_per_head_mul_fp16(
     device half*       out      [[buffer(0)]],

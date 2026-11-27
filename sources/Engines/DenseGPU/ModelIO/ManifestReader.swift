@@ -176,8 +176,8 @@ public enum ManifestReader {
         // `expertsPerLayer: 0` and an empty layout -- there is nothing streamed
         // per layer to name -- and requiring the files anyway refused every
         // dense install with a message about a file the format never promised
-        // to write. A mixed install (K2's three dense layers followed by 45
-        // sparse ones) is the same case per layer: its dense layers carry no
+        // to write. A mixed install (a few dense layers followed by sparse
+        // ones) is the same case per layer: its dense layers carry no
         // expert file, and `arch.denseLayerIndices` is where the install says
         // which ones. The layout cross-check reads the per-layer counts and is
         // what bounds every file that does exist.
@@ -217,8 +217,8 @@ public enum ManifestReader {
             // to constrain. The slot still has to satisfy `validateQuant`'s
             // table, so allow both rather than inventing a rule.
             allowedRouterBits = [4, 8]
-        case .k2Horizon, .laguna:
-            // These routers stay bf16 in the checkpoint; the install's slot
+        case .laguna:
+            // This router stays bf16 in the checkpoint; the install's slot
             // still has to name a width the format accepts, and the runtime
             // reads the tensor's actual dtype.
             allowedRouterBits = [4, 8]
@@ -358,52 +358,5 @@ public enum ManifestReader {
             e.ple.vocabDivisor)
         try checkOptional("routerNormTopK", a.routerNormTopK, e.routerNormTopK)
         try checkOptional("quantGroupSize", a.quantGroupSize, e.quantGroupSize)
-
-        try validateK2Extensions(a, expected: e)
-    }
-
-    /// K2's layer shape is required, not optional: a manifest that omits the
-    /// softplus gate, the 2.5 router scale, the grouped norm or the MoVA expert
-    /// count would otherwise be executed under a Qwen-shaped default, which
-    /// answers fluently and wrongly. The writer emits every key for this family,
-    /// so absence is a corrupt or foreign manifest.
-    ///
-    /// Split out of `validateArch` when the ten comparisons took that body past
-    /// the 120-line gate; the extension block is what grows with each family.
-    private static func validateK2Extensions(
-        _ a: ManifestArch,
-        expected e: ArchConfig
-    ) throws {
-        guard e.modelFamily == .k2Horizon else { return }
-        func check<T: Equatable & CustomStringConvertible>(
-            _ field: String, _ actual: T?, _ expected: T
-        ) throws {
-            guard let actual else {
-                throw ModelError.archMismatch(
-                    field: field,
-                    expected: "\(expected)",
-                    actual: "not declared")
-            }
-            if actual != expected {
-                throw ModelError.archMismatch(
-                    field: field,
-                    expected: "\(expected)",
-                    actual: "\(actual)")
-            }
-        }
-        try check("normGroups", a.normGroups, e.normGroups)
-        try check("attentionGate", a.attentionGate, e.attentionGate.rawValue)
-        try check("routerHasBias", a.routerHasBias, e.routerHasBias)
-        try check("routerScaling", a.routerScaling, e.routerScaling)
-        try check("movaNumExperts", a.movaNumExperts, e.mova.numExperts)
-        try check("movaTopKExperts", a.movaTopKExperts, e.mova.topKExperts)
-        try check(
-            "movaRouterScaling", a.movaRouterScaling, e.mova.routerScaling)
-        try check(
-            "movaRouterHasBias", a.movaRouterHasBias, e.mova.routerHasBias)
-        try check("movaActivation", a.movaActivation, e.mova.activation)
-        try check(
-            "denseLayerIndices", a.denseLayerIndices?.description,
-            e.denseLayerIndices.description)
     }
 }

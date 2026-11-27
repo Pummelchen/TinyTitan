@@ -38,16 +38,12 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// so the answer reported here starts where the template's would.
     private var trimsLeadingNewlines = false
     private var toolTokens: [Int32]?
-    /// Held text that might be the beginning of K2's closing think tag. The
-    /// model can spell `</ifm|think>` as ordinary tokens instead of the special
-    /// token under sampling; the ID check then misses it and the tag ends up in
-    /// the reasoning. Holding back only the longest suffix that is a prefix of
-    /// the marker lets the text-level split see a marker split across tokens.
+    /// Held text that might be the beginning of the closing think tag. The
+    /// model can spell the tag as ordinary tokens instead of the special token
+    /// under sampling; the ID check then misses it and the tag ends up in the
+    /// reasoning. Holding back only the longest suffix that is a prefix of the
+    /// marker lets the text-level split see a marker split across tokens.
     private var thoughtSuffix = ""
-    /// True between K2's `<ifm|tool_calls>` and `</ifm|tool_calls>`: text in
-    /// there is framing the template wrote, not the model's answer, so it is
-    /// dropped while the inner calls are parsed.
-    private var inToolWrapper = false
     private var emittedCalls = 0
     private var failed = false
 
@@ -153,9 +149,6 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// `<tool_call>`…`</tool_call>` buffer tokens for the Qwen parser.
     /// Everything else streams in whichever channel is open.
     private func consumeChatML(tokenID: Int32, delta: String) throws -> [StructuredAssistantEvent] {
-        if let events = try consumeToolCallsWrapper(tokenID: tokenID, delta: delta) {
-            return events
-        }
         if parsesToolCalls, let events = try consumeToolToken(tokenID: tokenID, delta: delta) {
             return events
         }
@@ -178,7 +171,9 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
             channel = .visible
             return events
         }
-        if channel == .thought, tokenizer.dialect == .k2, !tokenizer.thinkEndMark.isEmpty {
+        if channel == .thought, tokenizer.chatDialect.closesThoughtOnMarkerText,
+            !tokenizer.thinkEndMark.isEmpty
+        {
             return consumeTextThinkEnd(delta)
         }
         return channelEvents(delta)
@@ -218,45 +213,6 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
         return 0
     }
 
-    /// K2's outer `<ifm|tool_calls>` wrapper. The model writes it around one or
-    /// more inner calls, and it is template framing: without suppressing it a
-    /// successful tool call still leaked `<ifm|tool_calls>` / `</ifm|tool_calls>`
-    /// into `content` (measured on the real install). Everything inside the
-    /// wrapper that is not an inner call is dropped, including the newlines the
-    /// template puts between them.
-    private func consumeToolCallsWrapper(
-        tokenID: Int32, delta: String
-    ) throws -> [StructuredAssistantEvent]? {
-        guard let startID = tokenizer.toolCallsStartID,
-            let endID = tokenizer.toolCallsEndID
-        else { return nil }
-        if tokenID == startID {
-            guard !inToolWrapper else {
-                failed = true
-                throw ToolCallParserError.malformed
-            }
-            let prefix = try boundaryPrefix(delta, marker: tokenizer.toolCallsStartMark)
-            let events = channelEvents(prefix)
-            inToolWrapper = true
-            return events
-        }
-        if tokenID == endID {
-            guard inToolWrapper else {
-                failed = true
-                throw ToolCallParserError.malformed
-            }
-            _ = try boundaryPrefix(delta, marker: tokenizer.toolCallsEndMark)
-            inToolWrapper = false
-            return []
-        }
-        guard inToolWrapper else { return nil }
-        if parsesToolCalls, let events = try consumeToolToken(tokenID: tokenID, delta: delta) {
-            return events
-        }
-        // Whitespace and other framing inside the wrapper never reaches content.
-        return []
-    }
-
     /// A tool marker, or a token inside an open call; nil for anything else.
     private func consumeToolToken(
         tokenID: Int32,
@@ -286,20 +242,6 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
                 case .chatML:
                     call = try QwenToolCallParser().parse(
                         text, allowedTools: allowedTools, id: idGenerator())
-                case .k2:
-                    // The decoder buffers one inner call; the parser wants the
-                    // wrapper the template writes around it. Runtime prompts
-                    // ask for the default xml call body.
-                    let wrapped =
-                        "<ifm|tool_calls><ifm|tool_call>\(text)"
-                        + "</ifm|tool_call></ifm|tool_calls>"
-                    let calls = try K2ToolCallParser.parse(
-                        wrapped, allowedTools: allowedTools, format: .xml,
-                        makeID: idGenerator)
-                    guard calls.count == 1 else {
-                        throw ToolCallParserError.malformed
-                    }
-                    call = calls[0]
                 case .inkling:
                     // An Inkling tokenizer never reaches this engine's copy of
                     // the decoder; refuse rather than guess its call format.
@@ -327,7 +269,7 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     /// tail never becomes visible.
     public func consumeTail(_ text: String) throws -> [StructuredAssistantEvent] {
         guard !failed else { throw ToolCallParserError.malformed }
-        guard toolTokens == nil, !inToolWrapper else { return [] }
+        guard toolTokens == nil else { return [] }
         var events: [StructuredAssistantEvent] = []
         if !thoughtSuffix.isEmpty {
             events.append(.reasoning(thoughtSuffix))
@@ -361,7 +303,7 @@ public final class StructuredAssistantDecoder: @unchecked Sendable {
     }
 
     public func finish() throws {
-        guard !failed, toolTokens == nil, !inToolWrapper else {
+        guard !failed, toolTokens == nil else {
             throw ToolCallParserError.malformed
         }
     }

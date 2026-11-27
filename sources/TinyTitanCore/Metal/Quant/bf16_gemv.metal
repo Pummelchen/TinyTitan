@@ -45,10 +45,10 @@ kernel void bf16_gemv_simd(
 
 // The same GEMV, but the logits stay float.
 //
-// A router needs full float logits: K2-Horizon's selection applies sigmoid and
-// a bias, and rounding the logits to half first would change the top-k order
-// near a tie -- a different expert set, not a different last bit. Every other
-// caller wants half activations and keeps `bf16_gemv_simd`.
+// A router needs full float logits: its selection applies sigmoid and a bias,
+// and rounding the logits to half first would change the top-k order near a
+// tie -- a different expert set, not a different last bit. Every other caller
+// wants half activations and keeps `bf16_gemv_simd`.
 kernel void bf16_gemv_float_simd(
     device const bfloat* weights [[buffer(0)]],
     device const half*   x       [[buffer(1)]],

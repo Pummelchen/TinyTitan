@@ -2,8 +2,8 @@ import Foundation
 import Metal
 import TinyTitanCore
 
-/// K2-Horizon's sparse expert block: bf16 router, sigmoid selection, then the
-/// selected SwiGLU experts and the always-on shared expert.
+/// The sparse expert block a probe graph uses: bf16 router, sigmoid selection,
+/// then the selected SwiGLU experts and the always-on shared expert.
 ///
 /// The routed experts are separate GEMV dispatches over different blobs, so
 /// the stage owns one gate/up/act/down scratch slot per selected expert and a
@@ -140,22 +140,22 @@ final class K2MoEStage {
             return buffer
         }
         self.logits = try rawBuffer(
-            numExperts * MemoryLayout<Float>.stride, "k2.moe.logits")
+            numExperts * MemoryLayout<Float>.stride, "probe.moe.logits")
         self.indices = try rawBuffer(
-            topK * MemoryLayout<UInt32>.stride, "k2.moe.indices")
-        self.weights = try buffer(topK, "k2.moe.weights")
-        self.gateScratch = try buffer(topK * expertWidth, "k2.moe.gate")
-        self.upScratch = try buffer(topK * expertWidth, "k2.moe.up")
-        self.actScratch = try buffer(topK * expertWidth, "k2.moe.act")
-        self.downScratch = try buffer(topK * hiddenSize, "k2.moe.down")
-        self.sharedGate = try buffer(expertWidth, "k2.moe.sharedGate")
-        self.sharedUp = try buffer(expertWidth, "k2.moe.sharedUp")
-        self.sharedAct = try buffer(expertWidth, "k2.moe.sharedAct")
-        self.fusedActs = try buffer(topK * expertWidth, "k2.moe.fusedActs")
+            topK * MemoryLayout<UInt32>.stride, "probe.moe.indices")
+        self.weights = try buffer(topK, "probe.moe.weights")
+        self.gateScratch = try buffer(topK * expertWidth, "probe.moe.gate")
+        self.upScratch = try buffer(topK * expertWidth, "probe.moe.up")
+        self.actScratch = try buffer(topK * expertWidth, "probe.moe.act")
+        self.downScratch = try buffer(topK * hiddenSize, "probe.moe.down")
+        self.sharedGate = try buffer(expertWidth, "probe.moe.sharedGate")
+        self.sharedUp = try buffer(expertWidth, "probe.moe.sharedUp")
+        self.sharedAct = try buffer(expertWidth, "probe.moe.sharedAct")
+        self.fusedActs = try buffer(topK * expertWidth, "probe.moe.fusedActs")
         let argumentLength = fusedArgEncoder.encodedLength
-        self.gateArgs = try rawBuffer(argumentLength, "k2.moe.gateArgs")
-        self.upArgs = try rawBuffer(argumentLength, "k2.moe.upArgs")
-        self.downArgs = try rawBuffer(argumentLength, "k2.moe.downArgs")
+        self.gateArgs = try rawBuffer(argumentLength, "probe.moe.gateArgs")
+        self.upArgs = try rawBuffer(argumentLength, "probe.moe.upArgs")
+        self.downArgs = try rawBuffer(argumentLength, "probe.moe.downArgs")
     }
 
     /// The router GEMV (float logits) and selection. `hidden` is the post-norm
@@ -216,7 +216,7 @@ final class K2MoEStage {
 
         guard experts.count == topK else {
             throw ModelError.internalInconsistency(
-                detail: "K2 MoE selected \(topK) experts, but \(experts.count) are bound")
+                detail: "the sparse MoE selected \(topK) experts, but \(experts.count) are bound")
         }
         for slot in 0..<topK {
             try encodeSwiGLU(
@@ -293,7 +293,7 @@ final class K2MoEStage {
         }
         guard experts.count == topK else {
             throw ModelError.internalInconsistency(
-                detail: "K2 MoE selected \(topK) experts, but \(experts.count) are bound")
+                detail: "the sparse MoE selected \(topK) experts, but \(experts.count) are bound")
         }
         encodeArguments(experts)
 
@@ -407,7 +407,7 @@ final class K2MoEStage {
     ) throws {
         if view.dtype == 1 {
             throw ModelError.internalInconsistency(
-                detail: "K2 MoE expects quantized expert projections")
+                detail: "the sparse MoE expects quantized expert projections")
         }
         try gemv.encode(
             commandBuffer: commandBuffer,

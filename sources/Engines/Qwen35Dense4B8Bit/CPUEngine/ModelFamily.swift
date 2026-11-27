@@ -42,18 +42,6 @@ public enum ModelFamily: String, Sendable, Equatable {
     /// affine MoE-shaped tensors -- before the CPU engine saw it. The raw value
     /// matches the `model_type` the converter writes.
     case qwen35Dense = "qwen3_5_dense"
-    /// IFM K2-Horizon-MoVA-36B-A4B (`model_type: k2_horizon`).
-    ///
-    /// 48 layers, two expert systems per layer -- 100 routed SwiGLU experts at
-    /// top-8 and 64 MoVA value experts at top-4 inside attention -- a two-group
-    /// RMS norm, a softplus attention gate and a sigmoid router with a
-    /// selection bias and a 2.5 scale. Layers 0-2 are dense.
-    ///
-    /// The install format and the loader's identity reader know this family;
-    /// the GPU graph and kernels do not exist yet (see
-    /// `docs/plan-k2-horizon.md`), so `Model.load` refuses it by name at schema
-    /// validation rather than running a K2 payload through the Qwen graph.
-    case k2Horizon = "k2_horizon"
     /// Poolside Laguna-S-2.1 (`model_type: laguna`).
     ///
     /// 48 layers, 256 routed experts at top-10 plus one shared expert, GQA
@@ -64,6 +52,6 @@ public enum ModelFamily: String, Sendable, Equatable {
     /// configurations (YaRN on global, plain on sliding). Layer 0 is dense.
     ///
     /// The probe graph lives in `LagunaGraphProbe`; the general
-    /// `RealForwardRunner` refuses the family, exactly as it does for K2.
+    /// `RealForwardRunner` refuses the family.
     case laguna = "laguna"
 }

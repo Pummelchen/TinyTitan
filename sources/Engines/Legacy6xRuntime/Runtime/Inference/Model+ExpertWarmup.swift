@@ -3,7 +3,7 @@ import Foundation
 // The startup warm-up: load the experts the persisted routing profile ranks
 // hottest into the slot cache before the first request needs them.
 //
-// Ported from K2 (`K2ProbeRuntime.warmExpertCache`, c8487f1d). The profile
+// The profile
 // (`Model+ExpertProfile.swift`) already seeds the aging-LFU order, but the
 // cache itself starts empty, so the first request after a restart misses on
 // every expert of every layer. Warming loads the top N per layer through the

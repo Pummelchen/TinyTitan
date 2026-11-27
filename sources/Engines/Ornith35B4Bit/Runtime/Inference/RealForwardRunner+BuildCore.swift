@@ -21,18 +21,6 @@ extension RealForwardRunner {
         let cfg = model.config
         bp.cfg = cfg
         bp.maxContext = maxContext
-        // K2 has a working graph, but it is the probe's (K2GraphProbe), not
-        // this runner's: the layers here size a Qwen-shaped pipeline set whose
-        // kernels would read K2's gate projection as a packed q/gate. Refusing
-        // before any scratch is sized keeps that from happening, and the
-        // message names the path that does work.
-        guard cfg.modelFamily != .k2Horizon else {
-            throw ModelError.unsupportedArchitecture(
-                detail: "K2-Horizon does not run on this runner: the server's "
-                    + "probe backend serves it, and `TinyTitanBench k2gpu "
-                    + "<install> \"<prompt>\"` runs it directly. "
-                    + "See docs/plan-k2-horizon.md.")
-        }
         // Laguna is the same shape of exception: its decode probe exists, the
         // serving graph does not.
         guard cfg.modelFamily != .laguna else {

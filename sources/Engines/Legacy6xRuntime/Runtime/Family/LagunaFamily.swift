@@ -3,15 +3,15 @@ import Foundation
 /// Laguna-S-2.1's tensor-name contract.
 ///
 /// The checkpoint spells the language model at `model.layers.N.*`, the
-/// embedding at `model.embed_tokens` and the untied head at `lm_head` -- the
-/// same namespace K2-Horizon uses. The differences that matter:
+/// embedding at `model.embed_tokens` and the untied head at `lm_head`. The
+/// differences that matter:
 ///
 /// - the attention output gate is `self_attn.g_proj` and emits one value per
 ///   *head*, not per channel;
 /// - every layer carries per-head `self_attn.q_norm` / `k_norm` weights;
 /// - the routed-expert router is `mlp.gate.weight` and its selection-only
 ///   bias keeps the checkpoint's spelling `mlp.experts.e_score_correction_bias`;
-/// - the shared expert is singular (`mlp.shared_expert`), not K2's plural.
+/// - the shared expert is singular (`mlp.shared_expert`).
 package enum LagunaTensors {
     static let embedding = "model.embed_tokens.weight"
     static let lmHead = "lm_head.weight"

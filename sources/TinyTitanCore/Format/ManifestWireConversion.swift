@@ -5,8 +5,9 @@ import TinyTitanFormat
 // package types become the runtime's `Manifest` and its parts.
 //
 // Split out of `ManifestReader.swift` (2026-10-25) as pure code motion under
-// the 500-line-per-file rule; the K2 fields are the keys that pushed the reader
-// over it, and this block was already a cohesive seam at the end of the file.
+// the 500-line-per-file rule; the per-family extension fields are the keys that
+// pushed the reader over it, and this block was already a cohesive seam at the
+// end of the file.
 // The initializers are `internal` rather than `fileprivate` because the caller
 // (`ManifestReader.decode`) stays behind in the other file.
 

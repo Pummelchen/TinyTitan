@@ -98,9 +98,9 @@ public struct PLEConfig: Sendable, Equatable {
 ///
 /// `attnOutputGate` says whether a gate exists; this says which function turns
 /// the gate projection into a multiplier. Qwen's families use `sigmoid`, where
-/// reading a K2 install as `softplus` would still produce bounded, positive
-/// gates and fluent nonsense rather than a shape error -- so it is declared
-/// per family and read from the manifest, never assumed.
+/// reading a softplus-gated install as `sigmoid` would still produce bounded,
+/// positive gates and fluent nonsense rather than a shape error -- so it is
+/// declared per family and read from the manifest, never assumed.
 public enum AttentionGateFunction: String, Sendable, Equatable {
     case none
     case sigmoid
@@ -108,7 +108,7 @@ public enum AttentionGateFunction: String, Sendable, Equatable {
     case softplus
 }
 
-/// K2-Horizon's MoVA (mixture of value experts) attention block.
+/// A MoVA (mixture of value experts) attention block.
 ///
 /// Every sparse layer replaces `v_proj` with a router over `numExperts` linear
 /// value experts: the selected `topKExperts` outputs pass through `activation`

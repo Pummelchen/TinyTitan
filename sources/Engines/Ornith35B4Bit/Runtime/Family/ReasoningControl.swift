@@ -5,25 +5,24 @@ import Foundation
 /// TinyTitan exposes exactly what the installed template implements: Ornith 1.5
 /// and Qwen 3.6 define only the binary `enable_thinking` switch, while the
 /// Qwen3.8-Flash-Next template additionally defines `reasoning_effort`
-/// low|medium|xhigh (default xhigh) and K2-Horizon defines low|medium|high
-/// (default high) while thinking is on. Verified against the pinned upstream
-/// `chat_template.jinja` on 2026-08-27; see docs/qwen38-flash-next-port.md and
-/// docs/plan-k2-horizon.md. Re-verified 2026-09-11 against every installed
-/// template (Qwen 3.6, AgentWorld, Ornith 1.5, Qwen3.8, and the CPU engine's
-/// Qwen3.5): ReasoningLevelTemplateTests renders each one.
+/// low|medium|xhigh (default xhigh). Verified against the pinned upstream
+/// `chat_template.jinja` on 2026-08-27; see docs/qwen38-flash-next-port.md.
+/// Re-verified 2026-09-11 against every installed template (Qwen 3.6,
+/// AgentWorld, Ornith 1.5, Qwen3.8, and the CPU engine's Qwen3.5):
+/// ReasoningLevelTemplateTests renders each one.
 public enum ModelReasoningControl: Sendable, Equatable {
     case binaryThinking
     /// The levels the template accepts are listed, not inferred from the
-    /// enum's cases: Qwen3.8 accepts xhigh but not high, K2 accepts high but
-    /// not xhigh, and a family that advertised the other one's set would send
-    /// an effort its template raises on.
+    /// enum's cases: Qwen3.8 accepts xhigh but not high, and a family that
+    /// advertised the other one's set would send an effort its template
+    /// raises on.
     case thinkingWithEffortLevels(
         defaultEffort: ModelReasoningEffort,
         supported: [ModelReasoningEffort])
-    /// An effort template with no closed form. K2's generation prompt always
-    /// opens a think tag and selects it from the effort (think / think_fast /
-    /// think_faster), so there is no thinking-off prompt to offer: `.off` is
-    /// not in `supported` and validating it is an error.
+    /// An effort template with no closed form. Its generation prompt always
+    /// opens a think tag and selects it from the effort, so there is no
+    /// thinking-off prompt to offer: `.off` is not in `supported` and
+    /// validating it is an error.
     case effortOnly(
         defaultEffort: ModelReasoningEffort,
         supported: [ModelReasoningEffort])
@@ -62,9 +61,6 @@ extension ModelFamily {
             // so a 4.0 template that adds or drops a level changes only here.
             return .thinkingWithEffortLevels(
                 defaultEffort: .xhigh, supported: [.low, .medium, .xhigh])
-        case .k2Horizon:
-            return .effortOnly(
-                defaultEffort: .high, supported: [.low, .medium, .high])
         case .laguna:
             // Laguna's template takes `enable_thinking` as a boolean, so the
             // runtime offers the ordinary on/off switch.
@@ -72,9 +68,10 @@ extension ModelFamily {
         }
     }
 
-    /// Whether the template can render a turn that does not think. K2 cannot:
-    /// its generation prompt always opens a think block, so a configurator
-    /// must offer an effort rather than an off switch.
+    /// Whether the template can render a turn that does not think. A template
+    /// with no closed form cannot: its generation prompt always opens a think
+    /// block, so a configurator must offer an effort rather than an off
+    /// switch.
     public var supportsThinkingOff: Bool {
         if case .effortOnly = reasoningControl { return false }
         return true
@@ -252,7 +249,7 @@ extension ModelReasoningControl {
     ///
     /// `ModelReasoningEffort` is the union of the shipped templates' levels;
     /// each control carries the subset its own template accepts, because
-    /// Qwen3.8 raises on `high` and K2 raises on `xhigh`.
+    /// Qwen3.8 raises on `high`.
     /// Public because the server's request path maps a client's level to the
     /// nearest one the served model renders, and names the set it chose from
     /// in its log line.

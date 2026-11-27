@@ -44,7 +44,7 @@ struct LayerLayout: Sendable {
     let file: String  // basename, e.g. "layer_00.bin"
     let experts: [ExpertEntry]
     /// Per-layer expert count when it differs from the install-wide value;
-    /// `nil` means uniform. K2's dense layers carry 0 and its sparse layers 100.
+    /// `nil` means uniform. A mixed dense/sparse install's dense layers carry 0.
     let expertsPerLayer: Int?
 
     init(

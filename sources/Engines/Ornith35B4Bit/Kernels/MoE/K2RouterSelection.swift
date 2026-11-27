@@ -2,16 +2,14 @@ import Foundation
 import Metal
 import TinyTitanCore
 
-/// K2-Horizon's router selection: sigmoid scores, a selection bias, top-k
+/// A probe graph's router selection: sigmoid scores, a selection bias, top-k
 /// renormalization and the family's scaling factor.
 ///
 /// The Qwen selector in `MoE` is a softmax over the top-k logits with an
-/// optional per-expert scale; K2's router adds its bias only to the ranking,
+/// optional per-expert scale; this router adds its bias only to the ranking,
 /// takes the weights from the un-biased sigmoid scores, normalizes over the
-/// selected set and multiplies by `router_scaling_factor` (2.5). Those are
+/// selected set and multiplies by `router_scaling_factor`. Those are
 /// different arithmetic, not a flag on the same one, so it has its own kernel.
-/// The same selection serves the 100-expert MoE (top-8) and the 64-expert MoVA
-/// value router (top-4); both pass their counts in.
 final class K2RouterSelection {
     private let pso: MTLComputePipelineState
 

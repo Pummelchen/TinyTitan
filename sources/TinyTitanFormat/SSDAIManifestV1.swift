@@ -79,9 +79,10 @@ package struct SSDAIManifestArchV1: Codable, Equatable, Sendable {
     package let sharedExpertGated: Bool?
     package let ropeNeoxSubdim: Bool?
 
-    /// K2-Horizon's layer shape. Written only for that family, but optional
-    /// here so every earlier manifest still decodes; a reader that needs them
-    /// refuses a K2 manifest that omits one by name rather than assuming.
+    /// A probe family's layer shape. Written only for such a family, but
+    /// optional here so every earlier manifest still decodes; a reader that
+    /// needs them refuses a manifest that omits one by name rather than
+    /// assuming.
     package let normGroups: Int?
     package let attentionGate: String?
     package let routerHasBias: Bool?

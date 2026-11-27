@@ -113,9 +113,9 @@ final class Elementwise {
             count: count, inScale: inScale, outScale: nil)
     }
 
-    /// out = silu(gate) * up, the SwiGLU activation K2's dense and shared
-    /// experts use. The Qwen families get the same arithmetic inside their
-    /// fused expert kernels; this entry point is for callers that run the two
+    /// out = silu(gate) * up, the SwiGLU activation a dense or shared expert
+    /// uses. The Qwen families get the same arithmetic inside their fused
+    /// expert kernels; this entry point is for callers that run the two
     /// projections as separate GEMVs.
     func encodeSiluMul(
         commandBuffer: MTLCommandBuffer,
@@ -187,7 +187,8 @@ final class Elementwise {
         encoder.endEncoding()
     }
 
-    /// out[i] *= softplus(gate[i]; beta = ln 2) — K2-Horizon's attention gate.
+    /// out[i] *= softplus(gate[i]; beta = ln 2) — the beta-scaled attention
+    /// gate a probe graph applies before o_proj.
     func encodeSoftplusGateMul(
         commandBuffer: MTLCommandBuffer,
         out: MTLBuffer, outOffset: Int = 0,

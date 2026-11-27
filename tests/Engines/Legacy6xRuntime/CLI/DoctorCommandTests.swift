@@ -6,9 +6,9 @@ import TinyTitanLib
 @testable import TinyTitanCLICore
 @testable import Legacy6xRuntime
 
-/// K2's output contract. Every input is synthetic: capabilities, the models
-/// tree, free space and the process list. Nothing here reads this host's chip,
-/// memory or running processes.
+/// The doctor's output contract. Every input is synthetic: capabilities, the
+/// models tree, free space and the process list. Nothing here reads this host's
+/// chip, memory or running processes.
 @Suite struct DoctorCommandTests {
     private func capabilities(
         apple10: Bool,
@@ -282,19 +282,10 @@ import TinyTitanLib
     }
 
     @Test func unsupportedFamiliesAreRefusedWithAReason() throws {
-        // A memory fit is not a capability claim: K2's install validates but
-        // its graph does not exist, and doctor must say that rather than list
-        // it as a model this machine can run. The reason comes from the
-        // adapter's identity, not from a family table in doctor.
-        let k2Models = try self.makeModelsDirectory(
-            family: "k2_horizon", modelID: "k2-horizon-4bit")
-        defer { try? FileManager.default.removeItem(at: k2Models.deletingLastPathComponent()) }
-        let k2 = DoctorReport.build(
-            self.environment(
-                models: k2Models, capabilities: self.capabilities(apple10: false)))
-        #expect(k2.skipped.count == 1)
-        #expect(k2.skipped.first?.reason.contains("server's probe backend") == true)
-
+        // A memory fit is not a capability claim: a draft head has no layers
+        // of its own, and doctor must say that rather than list it as a model
+        // this machine can run. The reason comes from the adapter's identity,
+        // not from a family table in doctor.
         let mtpModels = try self.makeModelsDirectory(
             family: "qwen36_mtp", modelID: "qwen3.6-35b-a3b-mtp-4bit")
         defer { try? FileManager.default.removeItem(at: mtpModels.deletingLastPathComponent()) }

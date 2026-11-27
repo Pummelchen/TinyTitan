@@ -22,10 +22,9 @@ public enum ModelThinkingMode: String, Codable, CaseIterable, Sendable {
 /// The reasoning-effort levels defined by chat templates that support them.
 /// The Qwen3.8-Flash-Next template accepts `reasoning_effort` while thinking
 /// is on and injects an effort-specific instruction into the system block
-/// (`xhigh` is its default; `medium` is accepted but injects no text). K2's
-/// template accepts `low`, `medium` and `high` (`high` is its default) and
-/// raises on `xhigh`. Each family lists the subset it accepts in
-/// `ModelReasoningControl`, so this enum is the union, not one template's set.
+/// (`xhigh` is its default; `medium` is accepted but injects no text). Each
+/// family lists the subset it accepts in `ModelReasoningControl`, so this enum
+/// is the union, not one template's set.
 /// Ornith 1.5 and Qwen 3.6 templates define no effort levels, so those
 /// families reject these values at the surface instead of faking them.
 /// `ReasoningLevel` is the one-picker view over this and `ModelThinkingMode`.

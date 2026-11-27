@@ -61,8 +61,9 @@ public struct ArchConfig: Sendable, Equatable {
     /// per-slot value; this is the architecture-level default for planning.
     public let quantGroupSize: Int
 
-    // K2-Horizon (MoVA) extensions. The defaults describe every Qwen family,
-    // so adding them changes no existing architecture contract.
+    // Probe-family extensions (layer shape, gating, MoVA). The defaults
+    // describe every Qwen family, so adding them changes no existing
+    // architecture contract.
     /// RMS-norm groups inside one hidden width: each group normalizes over
     /// `hiddenSize / normGroups` elements and scales with its own weight slice.
     /// 1 is the ordinary whole-vector RMS norm.
@@ -76,7 +77,7 @@ public struct ArchConfig: Sendable, Equatable {
     public let routerScaling: Double
     /// Layers whose MLP is dense (no routed experts). Empty for a uniform MoE.
     public let denseLayerIndices: [Int]
-    /// MoVA value-expert attention. `.none` for every non-K2 family.
+    /// MoVA value-expert attention. `.none` when a family has no such block.
     public let mova: MoVAConfig
     /// Per-layer head counts, QK norms and RoPE dialects for the families that need them. `.none`
     /// for every other family.

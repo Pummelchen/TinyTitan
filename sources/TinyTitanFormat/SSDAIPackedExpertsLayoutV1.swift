@@ -45,7 +45,7 @@ package struct SSDAILayerV1: Codable, Equatable, Sendable {
     /// Per-layer expert count when this layer differs from the install's
     /// `expertsPerLayer`; nil means it uses the install-wide value.
     ///
-    /// A mixed dense/sparse model needs it: K2-Horizon's first three layers
+    /// A mixed dense/sparse model needs it: such a model's first layers
     /// are dense and the other 45 carry 100 experts each, so one value cannot
     /// describe both. Optional so every install written before mixed layers
     /// existed decodes unchanged.
@@ -323,7 +323,7 @@ package enum SSDAIV1StructuralValidator {
         // agreement above is the real check for that case.
         guard expectedLayerSize > 0 else { return }
         for layer in layout.layers {
-            // A mixed install (K2's three dense layers, then 45 sparse ones)
+            // A mixed install (a few dense layers, then sparse ones)
             // says per layer how many experts it carries. A layer with none has
             // no packed file either, so it is not a missing entry -- the
             // per-layer count is what makes that distinguishable from a sparse

@@ -39,11 +39,11 @@ extension RepackPlanner {
             // The draft needs no sidecar files of its own: it has no n-gram
             // block, and its embedding and head are the target's.
             return []
-        case .qwen35Dense, .k2Horizon, .laguna, .inkling2:
+        case .qwen35Dense, .laguna, .inkling2:
             // A dense Qwen 3.5 has no hashed n-gram block and no PLE
             // constants; its tokenizer travels with the payload like every
-            // other family's. K2-Horizon likewise carries only its tokenizer
-            // and template.
+            // other family's. Laguna likewise carries only its tokenizer and
+            // template.
             return []
         case .qwen38flash, .qwen4flash:
             return [
@@ -137,24 +137,6 @@ enum RepackPlanner {
         if family == .laguna {
             // Laguna's snapshot keeps the checkpoint's names, with the 256
             // experts already fused into `mlp.switch_mlp.*` by the converter.
-            if isMultimodalTensorName(name) { return .excludedMultimodal }
-            if let role = routedExpertRole(in: name),
-                let layer = layerIndex(in: name),
-                layer >= 0, layer < numLayers
-            {
-                return .routedExpert(role: role, layer: layer)
-            }
-            if name.hasPrefix("model.") || name.hasPrefix("lm_head.") {
-                return .lmResident
-            }
-            return .unknown
-        }
-        if family == .k2Horizon {
-            // K2's snapshot keeps the checkpoint's names: the MoE experts are
-            // fused into the repacker's `switch_mlp` spelling by the
-            // converter, and everything else -- attention, the attention gate,
-            // the value router, the 64 MoVA experts, the norms, the embedding
-            // and the head -- is resident.
             if isMultimodalTensorName(name) { return .excludedMultimodal }
             if let role = routedExpertRole(in: name),
                 let layer = layerIndex(in: name),

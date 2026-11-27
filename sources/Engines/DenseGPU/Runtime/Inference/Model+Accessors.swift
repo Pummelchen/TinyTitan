@@ -61,48 +61,6 @@ extension Model {
         try resident(name: schema.oProj(L))
     }
 
-    // MARK: K2-Horizon roles
-
-    /// The separate softplus-gate projection (`hidden -> heads * headDim`).
-    /// K2 does not pack it into q_proj the way the Qwen families do.
-    public func k2AttentionGate(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.attnGate(L))
-    }
-    /// The dense layers 0-2 SwiGLU MLP.
-    public func k2DenseGate(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.denseGate(L))
-    }
-    public func k2DenseUp(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.denseUp(L))
-    }
-    public func k2DenseDown(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.denseDown(L))
-    }
-    public func k2MoeRouter(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.moeRouter(L))
-    }
-    public func k2MoeRouterBias(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.moeRouterBias(L))
-    }
-    public func k2SharedGate(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.sharedGate(L))
-    }
-    public func k2SharedUp(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.sharedUp(L))
-    }
-    public func k2SharedDown(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.sharedDown(L))
-    }
-    public func k2VRouter(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.vRouter(L))
-    }
-    public func k2VRouterBias(layer L: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.vRouterBias(L))
-    }
-    public func k2VExpert(layer L: Int, expert: Int) throws -> TensorView {
-        try resident(name: K2HorizonTensors.vExpert(L, expert))
-    }
-
     // MARK: Laguna-S-2.1 roles
 
     /// One softplus gate per query head (`hidden -> heads`), applied to that

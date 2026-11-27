@@ -160,18 +160,6 @@ extension Model {
         let checks = RuntimeSchemaChecks(residentIndex: residentIndex, quant: quant)
 
         switch config.modelFamily {
-        case .k2Horizon:
-            // The install validates like any other; what does not exist is the
-            // GPU graph. `Model.load` may return the handle -- reading its
-            // tensors is useful and honest -- while RealForwardRunner refuses
-            // the family before it builds a Qwen-shaped graph from it.
-            try Self.validateK2Schema(
-                checks: checks, layout: layout, config: config,
-                quant: quant, overrides: manifest.quantOverrides)
-            // K2's schema is the whole check; the shared tail below asks for
-            // the Qwen layer roles (q_norm, packed q/gate) this family does not
-            // have.
-            return
         case .laguna:
             // Handled before the shared geometry gate; unreachable.
             return

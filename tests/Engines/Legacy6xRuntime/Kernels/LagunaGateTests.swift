@@ -7,7 +7,7 @@ import TinyTitanValidationSupport
 @testable import TinyTitanCore
 
 /// Laguna applies one plain softplus gate per head, broadcast across that
-/// head's dimensions, before o_proj. K2's kernel is a different function
+/// head's dimensions, before o_proj. The beta-scaled kernel is a different function
 /// (softplus with beta = ln 2), so the per-head form has its own test against
 /// the formula rather than borrowing that one's.
 @Suite struct LagunaGateTests {

@@ -6,11 +6,10 @@ import TinyTitanValidationSupport
 @testable import Legacy6xRuntime
 @testable import TinyTitanCore
 
-/// K2-Horizon's router is not the Qwen softmax router: sigmoid scores, the
-/// bias applied only to the ranking, the selected sigmoid scores normalized
-/// over top-k and scaled by `router_scaling_factor`. The same selection serves
-/// the 100-expert MoE (top-8) and the 64-expert MoVA router (top-4), so both
-/// shapes are pinned here.
+/// This router is not the Qwen softmax router: sigmoid scores, the bias
+/// applied only to the ranking, the selected sigmoid scores normalized over
+/// top-k and scaled by `router_scaling_factor`. Both the wide and the narrow
+/// expert shapes are pinned here.
 @Suite struct K2RouterSelectionTests {
     private struct Result {
         let indices: [UInt32]
@@ -83,7 +82,7 @@ import TinyTitanValidationSupport
     }
 
     @Test func moeShapeMatchesReference() throws {
-        var rng = SeedTree(0x100E_2A11).key("k2-router-moe")
+        var rng = SeedTree(0x100E_2A11).key("router-wide")
         let logits = (0..<100).map { _ in rng.uniform(-8, 8) }
         let bias = Self.biasInKernelUnits((0..<100).map { _ in rng.uniform(-2, 2) })
         let expected = Self.reference(
@@ -97,7 +96,7 @@ import TinyTitanValidationSupport
     }
 
     @Test func movaShapeMatchesReference() throws {
-        var rng = SeedTree(0x64A0_0F4).key("k2-router-mova")
+        var rng = SeedTree(0x64A0_0F4).key("router-narrow")
         let logits = (0..<64).map { _ in rng.uniform(-6, 6) }
         let bias = Self.biasInKernelUnits((0..<64).map { _ in rng.uniform(-1, 1) })
         let expected = Self.reference(

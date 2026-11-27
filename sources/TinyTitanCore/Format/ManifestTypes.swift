@@ -68,10 +68,10 @@ public struct ManifestArch: Decodable, Equatable, Sendable {
     public let ffnSandwichNorms: Bool?
     public let sharedExpertGated: Bool?
     public let ropeNeoxSubdim: Bool?
-    /// K2-Horizon's layer shape. Optional for the same reason as the block
-    /// above; the K2 arch resolver requires every one of them by name, because
-    /// reading a softplus gate as a sigmoid or a 2.5 router scale as 1 produces
-    /// fluent nonsense rather than a shape error.
+    /// A probe family's layer shape. Optional for the same reason as the block
+    /// above; a family that declares these is validated against them by name,
+    /// because reading a softplus gate as a sigmoid or a 2.5 router scale as 1
+    /// produces fluent nonsense rather than a shape error.
     public let normGroups: Int?
     public let attentionGate: String?
     public let routerHasBias: Bool?

@@ -18,9 +18,6 @@ enum RepackModelFamily: String, Sendable, Equatable {
     /// Qwen 3.5's dense text models (2B, 4B, 9B). A whole model, not a draft
     /// head, and the only family here whose weights carry no routed experts.
     case qwen35Dense = "qwen3_5_dense"
-    /// K2-Horizon's sparse family: 100 routed experts, a shared expert, a
-    /// grouped RMS norm, a softplus attention gate and MoVA value experts.
-    case k2Horizon = "k2_horizon"
     /// Laguna-S-2.1: per-head softplus gating, QK norms, two RoPE dialects
     /// and a 1:3 global-to-sliding layer mask.
     case laguna = "laguna"
@@ -106,8 +103,8 @@ struct ArchInfo: Sendable, Equatable {
     /// Affine quantization group size of the source checkpoint.
     let quantGroupSize: Int
 
-    // K2-Horizon (MoVA) extensions. Defaults describe the Qwen families, so
-    // adding them here changes no existing contract.
+    // Probe-family extensions (layer shape, gating, MoVA). Defaults describe
+    // the Qwen families, so adding them here changes no existing contract.
     let movaNumExperts: Int
     let movaTopKExperts: Int
     let normGroups: Int
@@ -294,9 +291,6 @@ struct ArchInfo: Sendable, Equatable {
         {
             return try loadQwen4Flash(configPath: configPath, tc: tc, root: root)
         }
-        if (root["model_type"] as? String) == "k2_horizon" {
-            return try loadK2Horizon(configPath: configPath, tc: tc)
-        }
         if (root["model_type"] as? String) == "laguna" {
             return try loadLaguna(configPath: configPath, tc: tc)
         }
@@ -304,7 +298,7 @@ struct ArchInfo: Sendable, Equatable {
             path: configPath,
             detail: "unsupported model_type (expected qwen3_5_moe, "
                 + "qwen3_5_mtp, qwen3_5_dense, qwen4_exp, qwen4_omni_moe, "
-                + "qwen4_omni, qwen4_flash or k2_horizon)")
+                + "qwen4_omni or qwen4_flash)")
     }
 
 }
