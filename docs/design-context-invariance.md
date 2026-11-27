@@ -66,8 +66,9 @@ stays native and refuses beyond it.
   **Verified:** all six dense GPU goldens (2B/4B/9B × 4/8-bit) at the 1M default;
   2B outputs identical at default/4M/16M.
 - One long text produces the same output at caps 1M, 2M, 4M, 8M and 16M.
-  **Verified at kernel level** (`DenseGPURoPETests`: threshold 4K, scalar and
-  prefill cross it; 4M/16M configs validate against the fixed 1M profile).
+  **Verified at kernel level** (the dense-GPU RoPE suite, deleted with that engine
+  in TT-142 slice (b): threshold 4K, scalar and prefill cross it; 4M/16M configs
+  validate against the fixed 1M profile).
   A real >262K end-to-end run is still the remaining performance test.
 - KV memory tracks the actual sequence, not the cap. A short prompt at the 1M
   default peaked at 1.99 GB, so the cap did not eagerly allocate the window.

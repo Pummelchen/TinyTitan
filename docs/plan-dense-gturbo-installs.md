@@ -1,3 +1,8 @@
+> **Withdrawn 2026-11-28 — the dense Qwen 3.5 family left the tree** with
+> TT-142 slice (b): `DenseGPU`, the six `Qwen35Dense*` variants, the CPU engine
+> and the `@cpu`/`@gpu` routes are deleted, so this document is a dated record,
+> not current guidance (`docs/plan-embedded-library.md`).
+
 # Plan: the dense Qwen 3.5 models as `.gturbo` installs
 
 The three small Qwen 3.5 models (2B, 4B, 9B) are the only installs in this

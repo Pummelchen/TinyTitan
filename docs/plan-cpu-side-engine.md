@@ -1,3 +1,9 @@
+> **Withdrawn 2026-11-28 — no side engine is wired.** The CPU side engine was
+> the dense Qwen 3.5 model this feature measured; it left with TT-142 slice (b),
+> so the server now runs memory's deterministic path (`sideEngine: nil`). The
+> `MemorySideEngine` port remains for a future judge. This document is the dated
+> measurement record, not current guidance.
+
 # Plan: a CPU side-engine
 
 TinyTitan is the runtime. The memory work needs a second, much smaller model —

@@ -144,6 +144,13 @@ TinyTitanCLICore      the CLI, rebuilt ON TinyTitanLib (routes through TinyTitan
 TinyTitanC (optional) the C ABI: tinytitan.h over an opaque handle
 ```
 
+> **Superseded in part, 2026-11-28 (TT-142 slice (b)).** The
+> `TinyTitanCPUEngine` row and the dense engines beside the plugins are gone;
+> see the decision above. The current product is `TinyTitanLib` +
+> `TinyTitanVariants` (+ `TinyTitanCore` and `TinyTitanPluginAPI`), and the
+> current target list is `docs/repository-layout.md`. The rest of this section
+> is the 2026-10-02 design record, kept as history.
+
 There is no single runtime target any more. Each shipped model is its own
 engine plugin target under `sources/Engines/`, and the generic pieces they
 share live in `TinyTitanCore` and `TinyTitanFormat`. What matters is the layer

@@ -12,14 +12,12 @@
 > replaces this file for every Zed user.
 <!-- agent-harnesses:end -->
 
-Swift and Metal inference for Qwen-family MoE and dense text models on Apple
-Silicon, streaming routed experts from SSD so a model larger than RAM still runs.
+Swift and Metal inference for large MoE text models on Apple Silicon, streaming
+routed experts from SSD so a model larger than RAM still runs.
 **The shipped matrix is Ornith 1.5 35B-A3B 4-bit and the two Inkling 2 Mini
 installs** (Q4_K_XL GGUF and NVFP4), each served by its own TPP/1 plugin; the
-engines for Qwen 3.6/3.8, KAT-Coder, AgentWorld, Ornith 122B/8-bit and Laguna
-left the tree with TT-142 on 2026-11-27. The dense Qwen 3.5 engines remain in
-the tree, but no dense install is in the shipped matrix and their library
-surface is TT-142 slice (b). **The README is the authority on which checkpoints
+engines for Qwen 3.6/3.8, KAT-Coder, AgentWorld, Ornith 122B/8-bit, Laguna and
+the dense Qwen 3.5 family left the tree with TT-142. **The README is the authority on which checkpoints
 and widths are supported** — it changes more often than this file, so do not
 treat any list here as the current matrix. Ornith 1.5 4-bit is the default
 golden target; 8-bit is not shipped and 6-bit is a withdrawn legacy format.
@@ -102,15 +100,14 @@ before reporting done:
 ## Layout and commands
 
 `sources/` holds one directory per SwiftPM target. `sources/Engines/` holds the
-shipped engine plugins (Ornith 1.5 4-bit, the two Inkling 2 Mini installs) and
-the dense engines; `sources/TinyTitanFormat/` plus
+shipped engine plugins (Ornith 1.5 4-bit, the two Inkling 2 Mini installs);
+`sources/TinyTitanFormat/` plus
 `sources/TinyTitanKernelsC/` are the format types and C kernels. `sources/TinyTitanRepack/`, `sources/TinyTitanCLI/` and
 `sources/TinyTitanServer/` hold the installer, CLI and loopback server; each of
 those three is a thin executable over a `*Core` library target
 (`TinyTitanRepackCore`, `TinyTitanCLICore`, `TinyTitanServerCore`).
 `sources/TinyTitanVariants/` is the engine-factory surface shared by the
-library product and the CLI, and `sources/TinyTitanCPUEngine/` is the dense CPU
-backend plus its public `CPUEngine` facade. `sources/TinyTitanMemory/` and `sources/ContinuityCore/` are persistent
+library product and the CLI. `sources/TinyTitanMemory/` and `sources/ContinuityCore/` are persistent
 agent memory, `sources/TinyTitanMemoryTool/` inspects it (executable
 `tinytitan-memory`), `sources/ContinuityDemo/` is the memory demo executable,
 `sources/TinyTitanBench/` plus `sources/TinyTitanValidation/` are the benchmark
@@ -201,8 +198,8 @@ The tree ships two products on one branch, `main` — one tree, one release tag,
 one CI, and separate surfaces:
 
 - **The library — `TinyTitanLib` (`sources/TinyTitanLib/`).** The supported
-  surface an embedder depends on: `Engine`, `Session`, `CPUEngine` (the dense
-  CPU facade), `EngineConfiguration`, `CachePrecision`, `ChatMessage`,
+  surface an embedder depends on: `Engine`, `Session`,
+  `EngineConfiguration`, `CachePrecision`, `ChatMessage`,
   `GenerationOptions`, the event/summary types and `TinyTitanError`. Every other declaration in that target is `package` on
   purpose: `public` there is a promise, so nothing becomes `public` by accident.
 - **The engine — the executables** (`TinyTitanCLI`, `TinyTitanServer`,
@@ -229,16 +226,17 @@ Rules that follow, and that need a decision recorded in
    tag; there is no second version to keep in step.
 
 **The product carries the factory surface.** `TinyTitanLib` the *product* names
-three targets: `TinyTitanLib`, `TinyTitanVariants` and
-`TinyTitanCPUEngine` (beside `TinyTitanCore` and `TinyTitanPluginAPI`). `TinyTitanVariants` is the 7.0 engine-factory surface —
-the selection table, the variant factories and the dense CPU selection — and it
-is a separate target precisely so that `TinyTitanLib` itself still imports no
-engine module while the CLI and an embedder can construct a variant engine. A single-model front end calls
+`TinyTitanLib` and `TinyTitanVariants` (beside `TinyTitanCore` and
+`TinyTitanPluginAPI`). `TinyTitanVariants` is the engine-factory surface — the
+plugin registry and the shipped selection table — and it is a separate target
+precisely so that `TinyTitanLib` itself still imports no engine module while the
+CLI and an embedder can construct an engine. A single-model front end calls
 `EngineFactories.routingFactory(directoryURL:)`; the server's router uses the
-same table. The dense CPU engine is the CPU target's `CPUEngine` over the
-`CPUModelBackend` the server also serves, through the same `Session`; the CLI
-selects it with `--engine cpu`. Do not move variant construction back into
-`TinyTitanServerCore`, and do not let the facade re-export it.
+same resolution. The dense CPU engine and its public `CPUEngine` facade left the
+product with TT-142 slice (b) on 2026-11-28 (`docs/plan-embedded-library.md`):
+no dense install is shipped, so the promise had no subject. Do not move engine
+construction back into `TinyTitanServerCore`, and do not let the facade
+re-export it.
 
 **Every model is an engine plugin (TPP/1, 2026-11-24).** A model joins
 TinyTitan through `TinyTitanPluginAPI`: one standalone library target, compiled
@@ -326,10 +324,10 @@ thing that checks two engines on one device, cancellation and `unload()`.
 That means any run that exercises a code path against a live model — a feature
 check, a live end-to-end, a hand-driven probe: `models/inkling-2-mini_NVFP4` (or
 `models/inkling-2-mini_GGUF-Q4`) when one is needed, `models/ornith-1.5_35B_A3B_4Bit`
-when the 35B MoE path is the subject. The dense Qwen 3.5 installs are no longer
-in the shipped matrix and their engines wait on TT-142 slice (b), so a note that
-uses one is describing history: the 2B's 2026-11-16 install was dead — zeroed
-weights returned repeated `!` until both widths were rebuilt on 2026-11-20
+when the 35B MoE path is the subject. A note that uses a dense Qwen 3.5 install
+is describing history: the family and its engines left the tree with TT-142
+slice (b) on 2026-11-28, and the 2B's 2026-11-16 install was dead in any case —
+zeroed weights returned repeated `!` until both widths were rebuilt on 2026-11-20
 (TT-098). This does not change the golden-baseline targets below, which are what
 they are.
 
@@ -355,11 +353,11 @@ linters:
   input.
 - `func-length` — no function over 120 lines without an inline `lint:allow-long
   <reason>`. The ratchet file `tools/func-length-baseline.txt` carries the
-  audited exemptions (17 rows: 9 from the formatter sweep that expanded
-  their bodies, and 8 verbatim copies of >120-line engine functions into the
-  shipped GPU variant and the shared dense-GPU variant — 7.0 duplication,
-  spec §1.2; the as-is GGUF decoder's AUD-025 row was dropped when its
-  pipeline split into per-layer helpers), and the gate fails on a stale
+  audited exemptions (13 rows: 9 from the formatter sweep that expanded
+  their bodies, and 4 verbatim copies of >120-line engine functions into the
+  shipped GPU variant — 7.0 duplication, spec §1.2; the as-is GGUF decoder's
+  AUD-025 row was dropped when its pipeline split into per-layer helpers, and
+  the four dense-GPU copies left with that engine), and the gate fails on a stale
   exemption row as well as on a new offender.
 - `file-length` — no production source under `sources/` over 500 physical lines,
   comments and blanks included; `tests/` is organised by the suite it covers and
@@ -376,8 +374,7 @@ linters:
   at nothing on a newer toolchain or at a stale binary on this one.
 - `stdout-clean` — no `print`, `debugPrint` or `standardOutput` write anywhere in
   the target closure `Package.swift` gives the `TinyTitanLib` **product** — the
-  facade plus `TinyTitanVariants` and
-  `TinyTitanCPUEngine` — resolved from the manifest rather than listed, so a
+  facade plus `TinyTitanVariants` — resolved from the manifest rather than listed, so a
   target added to the product enters the gate on the commit it enters the
   library. `library-facade` already holds rule 1 over the
   `TinyTitanLib` directory alone; the closure is where the rule actually bites,
@@ -402,13 +399,11 @@ linters:
   assert what the name promises, gate it with `.enabled(if:)`, or delete it. Like
   `test-skip` it fails when its own counter measured no bodies rather than
   reporting ok over a scan that ran on nothing.
-- `library-facade` — every `public` declaration in `TinyTitanLib` **and the
-  `CPUEngine` facade target** is on the measured allowlist
-  (`tools/library-facade-baseline.txt`). `public` there is a promise to an
-  embedder, so a new one is a deliberate act: `FACADE_UPDATE=1` re-measures the
-  list, and a decision belongs in `docs/plan-embedded-library.md` before it is
-  used to silence the gate. The CPU backend behind `CPUEngine` is `package`, so
-  it does not enter the promise by accident.
+- `library-facade` — every `public` declaration in `TinyTitanLib` is on the
+  measured allowlist (`tools/library-facade-baseline.txt`). `public` there is a
+  promise to an embedder, so a new one is a deliberate act: `FACADE_UPDATE=1`
+  re-measures the list, and a decision belongs in
+  `docs/plan-embedded-library.md` before it is used to silence the gate.
 - `docs` — a documented count, name, sha or table must match the repository, via
   `tools/docs-facts.py`. This is what catches the class the audit kept finding:
   a gate name in `AGENTS.md` that `tools/lint.sh` does not accept, and a restated

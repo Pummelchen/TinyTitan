@@ -56,33 +56,24 @@ and it needs a decision recorded in the plan first.
 directory is the name of the target:
 
 - **`sources/Engines/`** — one target per engine. Three are shipped and served:
-  `Ornith35B4Bit`, `Inkling2GGUFQ4` and `Inkling2NVFP4`. The rest — the shared
-  dense-GPU engine `DenseGPU` and the six dense CPU variants
-  (`Qwen35Dense{2B,4B,9B}{4,8}Bit`) — are engine code with no supported install,
-  still in the tree until TT-142 slice (b) retracts or replaces the `CPUEngine`
-  facade (`docs/plan-embedded-library.md`), and `registry/registry.json` lists
-  them under `unshippedTargets` rather than as variants. Each is a standalone
-  plugin target (TPP/1) and imports only `TinyTitanCore`, `TinyTitanFormat`,
-  `TinyTitanPluginAPI`, the C kernels and system frameworks. The old 6.x runtime
-  and its `LegacyEngineAdapter` are gone: no shipped family used them (TT-142,
-  2026-11-27).
+  `Ornith35B4Bit`, `Inkling2GGUFQ4` and `Inkling2NVFP4`. The dense family
+  (`DenseGPU` and the six `Qwen35Dense*` variants), the old 6.x runtime and its
+  `LegacyEngineAdapter` are gone: no shipped install used any of them (TT-142,
+  2026-11-27 and slice (b), 2026-11-28), and `registry/registry.json` carries no
+  `unshippedTargets` row. Each engine is a standalone plugin target (TPP/1) and
+  imports only `TinyTitanCore`, `TinyTitanFormat`, `TinyTitanPluginAPI`, the C
+  kernels and system frameworks.
 - **`TinyTitanLib`** — the library product: the supported facade (`Engine`,
   `Session`, their options, events, summary and errors) plus the generation
   orchestration it drives. No NIO and no HTTP: this is the target another Swift
   program depends on, and everything in it that is not the facade is `package`,
   so the promise stays small. See `docs/plan-embedded-library.md`.
-- **`TinyTitanVariants`** — the 7.0 engine-factory surface the library product
-  and the CLI share: the plugin selection table, the variant factories (Ornith
-  35B 4-bit, the dense GPU engine, the six dense CPU variants) and
-  `routingFactory(directoryURL:)`, which resolves an install through the plugin
-  registry — an install no plugin claims is refused by name.
+- **`TinyTitanVariants`** — the engine-factory surface the library product and
+  the CLI share: the plugin registry, the shipped selection table (Ornith
+  35B 4-bit) and `routingFactory(directoryURL:)`, which resolves an install
+  through the plugin registry — an install no plugin claims is refused by name.
   It is a separate target so `TinyTitanLib` itself imports no engine module; the
   product `TinyTitanLib` carries both. See `docs/plan-embedded-library.md` §3.
-- **`TinyTitanCPUEngine`** — the dense CPU backend the server serves plus its
-  public `CPUEngine` facade: the same `Session`, `ChatMessage` and
-  `GenerationOptions` surface as the GPU `Engine`, over `CPUModelBackend` and
-  `CPUEngineRunner`. It is in the library product so the CLI and an embedder can
-  choose CPU without the server; `--engine cpu` is the CLI's selection.
 - **`TinyTitanServer`, `TinyTitanCLI`, `TinyTitanRepack`, `TinyTitanMemoryTool`** — the four
   executables, each split into a SwiftPM-invisible `Command/` subdirectory
   (the `@main`/top-level entry) and a `Core/` library part that the tests

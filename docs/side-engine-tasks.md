@@ -1,3 +1,9 @@
+> **Withdrawn 2026-11-28 — no side engine is wired.** The CPU side engine was
+> the dense Qwen 3.5 model this feature measured; it left with TT-142 slice (b),
+> so the server now runs memory's deterministic path (`sideEngine: nil`). The
+> `MemorySideEngine` port remains for a future judge. This document is the dated
+> measurement record, not current guidance.
+
 # What the side-engine is asked, and exactly how
 
 A 2B model is not a small 35B. It is a capable text worker that fails in one

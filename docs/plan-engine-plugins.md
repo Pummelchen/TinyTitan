@@ -454,8 +454,14 @@ by their plugins — and the full suite plus the 19 lint gates are the check.
 Delete-only sibling: `TinyTitanLib/LegacyRuntimeBoundaryTests` pinned the
 adapter boundary; with no importers there is nothing to pin, and the compiler
 is the gate. The dense Qwen 3.5 engine code (`DenseGPU` and the six
-`Qwen35Dense*`) is **not** part of this decision: it remains shipped code whose
-library surface is TT-142 slice (b).
+`Qwen35Dense*`) was **not** part of this decision; it was TT-142 slice (b).
+
+**Update 2026-11-28 — slice (b) is done.** The owner retracted the
+`CPUEngine` library promise and deleted the dense family: `DenseGPU`, the six
+dense variants, `DenseQwen35Plugin`, `TinyTitanCPUEngine` and the CPU routes
+left the tree because no dense install is in the shipped matrix. The decision
+record is `docs/plan-embedded-library.md`; a dense family returns as one TPP/1
+plugin if anyone asks.
 
 ## Risks and open questions
 

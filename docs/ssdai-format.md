@@ -447,8 +447,8 @@ verification exact:
 
 - `tools/ssdai_diff_snapshot.py <install> <snapshot>` compares every resident
   tensor, weight plus scales plus biases, byte for byte;
-- `tests/TinyTitan/CPUEngine/DenseSSDAIEquivalenceTests.swift` loads both and
-  requires **identical logits**.
+- the former dense-CPU equivalence suite (deleted with the dense engines in
+  TT-142 slice (b)) loaded both and required **identical logits**.
 
 The second is the one that matters. The first proves the bytes are right, which
 a wrong per-tensor width would still pass — the bytes are right, they are just

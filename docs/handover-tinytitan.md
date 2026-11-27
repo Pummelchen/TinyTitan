@@ -1,6 +1,16 @@
 # Handover: engine 7 plugins, phase 2 (2026-11-25, updated after TT-126, TT-124 & TT-134 slice 5)
 
 **Read this block first; every block below it is older.**
+> **TT-142 slice (b) done (2026-11-28):** the `CPUEngine` library promise was
+> retracted and the dense family deleted — `TinyTitanCPUEngine`, `DenseGPU`, the
+> six `Qwen35Dense*`, `DenseQwen35Plugin`, the CPU/side-engine routes and the
+> `--cpu` / `--engine cpu` flags. The shipped product is `TinyTitanLib` +
+> `TinyTitanVariants` over the three GPU plugins. The decision is
+> `docs/plan-embedded-library.md` ("Decision 2026-11-28"). Every block below
+> that mentions `CPUEngine`, `DenseSideEngineModel`, `VariantCPUModelFamily`,
+> the dense variants or the CPU goldens is the 2026-11-25/27 record of code
+> that has since been removed; it is history, not the current tree.
+>
 > **DSH retired (2026-11-26):** the DeepSeek Harness plugin and `tools/dsh_route.sh` were removed; do not reintroduce them. The audit branch work below predates that decision; the plugin-related audit tasks are historical.
 
 

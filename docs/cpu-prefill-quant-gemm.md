@@ -153,7 +153,8 @@ The quality gate is the output column: greedy text is byte-identical at 641 and
 2,201 tokens, and 2,201 crosses the 2,048-token chunk boundary, so a state
 hand-off between chunks would show there. The C delta-rule kernel and the
 dequantized product are additionally checked against their scalar counterparts in
-`tests/TinyTitan/CPUEngine/CPUBatchedPrefillTests.swift`.
+the former CPU-engine batched-prefill suite, deleted with the dense engines in
+TT-142 slice (b).
 
 ### The 9B, both widths
 
