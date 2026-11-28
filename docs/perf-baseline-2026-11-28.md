@@ -144,6 +144,24 @@ The two gaps remain: the ~11 ms/token demand miss wait after phase-1 hit, and
 the ~11 ms/token host encode between the shared-expert and routed buffers. The
 next attempt has to pipeline host encoding across layers, not reorder the fetch.
 
+## Why Ornith's remaining gap is not a fetch-order bug
+
+The decode loop already pipelines across layers: at the top of layer L+1 it
+encodes that layer's attention while layer L's routed buffer is still queued.
+The unoverlapped window is *inside* a layer: after the tail buffer's router
+readback, the host encodes the routed buffer, whose phase-1 expert pointers
+cannot exist before that readback. Reordering the fetch (before or after the
+hit pass) was measured both ways and lost. Raising occupancy from 62% therefore
+needs the expert ids earlier than the router produces them (speculative
+routing) or a different decode schedule, not another knob.
+
+The routed-MoE benchmark's zero output was narrowed too: with the argument
+encoder and the declared `io_status` bound, Metal validation is clean and the
+kernel still writes zeros; a probe placed as the kernel's **first** statement
+(`acts[9] = 123`) never appears, so the executed function is not the bundle's
+`moe_phase1_gate_up_act_u16load` text despite the pipeline resolving that name.
+The harness needs its own minimal kernel test before its GB/s can be trusted.
+
 ## Next targets
 
 1. The `moe_phase1_hit -> miss_fixup` gap: start miss loads earlier or widen
