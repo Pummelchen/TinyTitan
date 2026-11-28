@@ -183,6 +183,22 @@ extension TinyTitanBench {
                 + "y0=\(y0) yLast=\(yLast)")
     }
 
+    /// The cadence gap in seconds, refusing a negative one.
+    ///
+    /// `envIntFlag` proves the operator typed a number; it does not prove the
+    /// number is a duration. A negative `TINYTITAN_BENCH_HEAD_CADENCE_MS` reached
+    /// `Thread.sleep(forTimeInterval:)`, which is documented for a non-negative
+    /// interval -- so the arm either trapped mid-run or slept nothing and
+    /// reported a "cadence" that was really the back-to-back arm. Say which
+    /// variable is wrong, before the measured loop starts (AUD-0112).
+    static func cadenceSeconds(_ milliseconds: Int) throws -> TimeInterval {
+        guard milliseconds >= 0 else {
+            throw BenchHarnessError.badConfiguration(
+                "TINYTITAN_BENCH_HEAD_CADENCE_MS must be 0 or more, got \(milliseconds)")
+        }
+        return Double(milliseconds) / 1000
+    }
+
     /// Cadence arm for `runHead`: one launch per command buffer with a
     /// wall-clock gap between them, measuring the GPU-state penalty decode's
     /// once-per-token cadence pays over back-to-back steady state.
@@ -214,6 +230,7 @@ extension TinyTitanBench {
                 "the cadence arm needs at least 2 iterations: it discards the first and divides by iterations-1"
             )
         }
+        let cadence = try Self.cadenceSeconds(cadenceMs)
         keepWarm?.start()
         // A thrown allocation below would otherwise leave the worker spinning
         // until the process exits; the success path stops it on the next lines
@@ -247,7 +264,7 @@ extension TinyTitanBench {
                 samples.append(seconds)
             }
             if i + 1 < iterations {
-                Thread.sleep(forTimeInterval: Double(cadenceMs) / 1000)
+                Thread.sleep(forTimeInterval: cadence)
             }
         }
         let spinDispatches = keepWarm.map { $0.stop() } ?? 0
