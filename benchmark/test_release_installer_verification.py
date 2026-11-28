@@ -276,6 +276,36 @@ class InstallRootValidationTests(unittest.TestCase):
         self.assertNotIn("/mkdir ", log.read_text(), "the refused run invoked mkdir")
 
 
+class ReleaseBinariesReadmeTests(unittest.TestCase):
+    """The README inside the archive names the install the repacker defaults to.
+
+    The 8-bit width is not shipped and 4-bit is the matrix default, but the text
+    shipped in every archive said the opposite -- "defaults to Ornith 1.5 8-bit
+    (about 36.9 GB); 4-bit remains available explicitly" -- so a reader was told
+    to expect a default the installer cannot produce (AUD-0108). The sentence is
+    a heredoc in `release.sh`, where no docs gate looks.
+    """
+
+    def readme(self) -> str:
+        text = RELEASE.read_text(encoding="utf-8")
+        start = text.index('README-binaries.txt" <<TXT')
+        start = text.index("\n", start) + 1
+        end = text.index("\nTXT\n", start)
+        return text[start:end]
+
+    def normalized(self) -> str:
+        """The block with its hard wrapping folded, so a sentence is one string."""
+        return " ".join(self.readme().split())
+
+    def test_the_default_install_is_the_four_bit_matrix_default(self) -> None:
+        readme = self.normalized()
+        self.assertIn("defaults to Ornith 1.5 35B-A3B 4-bit", readme)
+        self.assertNotIn("defaults to Ornith 1.5 8-bit", readme)
+
+    def test_the_withdrawn_width_is_named_as_withdrawn(self) -> None:
+        self.assertIn("8-bit width is not shipped", self.normalized())
+
+
 class VerifiedInstallTests(unittest.TestCase):
     """The path where both checksums exist and both match."""
 

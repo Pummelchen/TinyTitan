@@ -415,9 +415,9 @@ yourself after verifying the checksum published with this archive:
 
   xattr -dr com.apple.quarantine /path/to/tinytitan-$VERSION-macos-arm64
 
-No model weights are included. TinyTitanRepack defaults to Ornith 1.5 8-bit (about
-36.9 GB); 4-bit remains available explicitly. The runtime defaults to standard
-answers with thinking off, as described in the README and Wiki.
+No model weights are included. TinyTitanRepack defaults to Ornith 1.5 35B-A3B
+4-bit (about 19.5 GB); the 8-bit width is not shipped. The runtime defaults to
+standard answers with thinking off, as described in the README and Wiki.
 TXT
 
 step "package"
