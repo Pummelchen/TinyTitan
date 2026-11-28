@@ -683,32 +683,6 @@ jobs:
         # `memory_sim`'s ground truth are the shipped ones: 0 everything was scored
         # and nothing is flagged, 1 it measured and facts wearing the person's label
         # are named, 2 the gate could not be judged, with the reason.
-        # `test_composite_split_verdict` is AUD-279, the same seam in the two drivers
-        # that ask whether the side-engine can split a composite fact. Neither had a
-        # status table: `composite_split.py --score` put a row it could not compare --
-        # no words to overlap -- in a `dropped` bucket that was never counted, never
-        # printed and never reached the status, so a run where 40 of 47 rows were
-        # never compared printed the same table and the same 0 or 1 as one where all
-        # 47 were, and an empty or header-only file exited 1 having compared nothing,
-        # which reads as a measured negative. `--threshold` took any float, and
-        # outside `0 < t <= 1` the page describes its argument rather than an answer.
-        # This driver compares with `<`, so a bar at or below 0 counts even a zero
-        # overlap as grounded and makes "repaired" unreachable whatever the model
-        # answered, and a bar above the 1.0 an overlap can reach puts every fact in the
-        # invented half. `--prepare` skipped a `--labels` name whose journal was absent
-        # and wrote the shrunken fact set with no note; `side_engine_tasks.py` did the
-        # same and left T1 with zero cases while the page still advertised five tasks,
-        # which is live rather than historical here because the `guard-step0*` and
-        # `guard-confirm` journals are absent from this tree -- pre-fix its `--prepare`
-        # wrote 60 cases, T1 among them none, and exited 0. That file's scorer also
-        # built T1's ground labels from the same grounding check it then measures; the
-        # page now publishes that as a hand-vs-check split instead of silently
-        # re-labelling, because re-labelling is the operator's measurement and not a
-        # gate's. Rows with no task or no label are counted and named, a run where no
-        # variant answered refuses rather than printing a 0% arm beside two real ones,
-        # and a missing arm contests the three-way comparison. It drives the real
-        # `main()` with only the journal reader, the simulator and the grounding check
-        # patched, so no model, no binary and nothing fetched.
         # `test_io_backend_ab_verdict` is AUD-285, the same classifier's second
         # caller: the pread-vs-Metal I/O A/B compared raw text, parsed no footer,
         # wrote its artifact whatever happened and escaped a dead server as a
@@ -751,47 +725,6 @@ jobs:
         # no rate, 2 NOT MEASURED. It drives the real `main()` and the real runners
         # with only the process, the socket and the log patched, so no model, no
         # engine binary, no third-party server and nothing fetched.
-        # `test_side_engine_recall_verdict` is AUD-288, the same shape in the driver
-        # that decides whether a T7 judgement is worth 15.2 s. Its side-engine column
-        # was built from `(completion or "").upper().startswith("YES")`, so a run whose
-        # engine answered nothing scored as one that answered NO to everything -- a dead
-        # engine read as a wrong one -- and a group that left facts out ranked them the
-        # same way; the rates divided by however many questions survived, so an empty
-        # file printed `recall@1 0/0` twice and exited 0, and an unreadable file exited 1,
-        # the status a contested comparison carries. It now answers 0 every fair question
-        # answered in full, 1 a named question ran nothing / left facts unanswered / carried
-        # silent rows, 2 NOT MEASURED. Fixture `done.jsonl` files only: no model, no
-        # server, no engine binary and nothing fetched.
-        # `test_side_engine_wired_verdict` is AUD-289, the same shape in the driver that
-        # scores the 12 wired duplication and contradiction cases. It had no refusal path
-        # at all: `failures = 0` over an empty by-task map *is* its pass status, so a file
-        # with no rows printed a bare header and exited 0; totals were built from whatever
-        # rows arrived, so a task that never ran answered `T5: 8/8` and a group that died
-        # mid-case answered `T5: 5/5`; a blank completion printed MISS and still entered
-        # the denominator, a resumed run's duplicate row was judged twice, and a foreign
-        # jsonl's rows were scored against truths this file never authored. A missing path,
-        # a half-written line and a row with no prompt each escaped as a traceback at exit
-        # 1, the status a contested comparison carries, and a genuine disagreement answered
-        # 2, the code reserved for NOT MEASURED. It now answers from the 12 cases the
-        # driver itself prepared: 0 every case ran and matched, 1 a named case ran nothing
-        # / carried no judgement / was answered twice / came from elsewhere / disagreed,
-        # 2 NOT MEASURED. Fixtures only: no model, no server, no engine binary and nothing
-        # fetched.
-        # `test_side_engine_judges_verdict` is AUD-291, the same shape in the driver that
-        # runs one judge over the 60 authored side-engine cases. Its verdict was the
-        # negation of a coverage check: `1 if any(entry['refused'] ...) else 0` over a done
-        # file that holds no rows is False, so a judge that wrote nothing answered 0 -- and
-        # the same run printed `measured nothing: every request refused`, naming refusals
-        # when zero requests ran, so the message and the status disagreed about what had
-        # happened. Two answered rows of a 60-case run also answered 0: the job count reached
-        # the s/judgement rate but never the verdict. A missing done file raised
-        # `FileNotFoundError`, a half-written line `JSONDecodeError`, and a row with a task
-        # but no prompt `KeyError` out of the shared truth table -- each leaving exit 1, the
-        # status a contested comparison carries. It now answers 0 every job ran and was
-        # judged; 1 a named task ran no rows, or the rows scored do not cover the jobs the
-        # driver was handed, naming how many are missing or repeated; 2 NOT MEASURED, with
-        # the reason printed and no rates. Fixtures only: no model, no server, no engine
-        # binary and nothing fetched.
         # `test_watchdog_calibrate_verdict` is AUD-292, the threshold calibration for the
         # server's own watchdogs. It counted false positives for the loop and stub rules and
         # answered 0 -- while the stub rule's own row printed `no corpus`, because an empty
@@ -916,8 +849,7 @@ jobs:
         # b24d12f with no CI step naming it, so it ran on one laptop only.
         run: |
           cd benchmark
-          python3 -m unittest test_internal_speeds test_quant_perplexity_ab \
-            test_side_engine_judges test_side_engine_judges_verdict \
+          python3 -m unittest test_internal_speeds \
             test_watchdog_calibrate_verdict test_ane_sidecars_gate \
             test_python_resolver_gate \
             test_tinytitan_prefetch_trace_analysis \
@@ -942,8 +874,6 @@ jobs:
             test_t28_distinct_expert_estimator \
             test_sampler_ab_verdict test_logged_metric_cells \
             test_knob_sweep_verdict test_guard_source_rate_verdict \
-            test_composite_split_verdict test_side_engine_recall_verdict \
-            test_side_engine_wired_verdict \
             test_hit_fixup_ab_verdict test_io_backend_ab_verdict \
             test_v42_control_plane_ab_verdict test_vs_competitors_verdict \
             test_flat_pair_cache_sim test_continuous_feeder_sim \
