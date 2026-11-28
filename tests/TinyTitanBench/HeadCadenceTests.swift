@@ -109,3 +109,29 @@ import Testing
         }
     }
 }
+
+/// The `gdn_chain` arm's head geometry follows the selected bench shape.
+///
+/// The dispatches carried qwen36's literal counts (16 key, 32 value heads)
+/// while the buffers followed `TINYTITAN_BENCH_GDN_SHAPE`, so the qwen38 shape
+/// ran a 32-head delta step over 48-head buffers — a number for a shape the
+/// model does not have (AUD-0116).
+@Suite struct GDNChainShapeTests {
+    @Test func theQwen3ShapeKeepsItsThirtyTwoValueHeads() {
+        let shape = TinyTitanBench.GDNChainShape.forBenchShape(qwen38: false)
+        #expect(
+            shape
+                == TinyTitanBench.GDNChainShape(
+                    kHeads: 16, vHeads: 32, keyDim: 128, valueDim: 128))
+        #expect(shape.stateElements == 32 * 128 * 128)
+    }
+
+    @Test func theQwen38ShapeHasFortyEightValueHeads() {
+        let shape = TinyTitanBench.GDNChainShape.forBenchShape(qwen38: true)
+        #expect(shape.vHeads == 48)
+        #expect(shape.stateElements == 48 * 128 * 128)
+        // The buffer the arm allocates is zRows (48 * 128) halves, so the head
+        // count and the shape have to agree.
+        #expect(shape.vHeads * shape.valueDim == 6144)
+    }
+}
