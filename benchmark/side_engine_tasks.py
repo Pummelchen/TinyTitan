@@ -7,7 +7,8 @@ composed version of the same job. This measures the other six the same way,
 so the design is a finding rather than a claim.
 
     python3.13 benchmark/side_engine_tasks.py --prepare jobs.jsonl
-    .build/.../TinyTitanBench cpu35batch <snapshot> jobs.jsonl done.jsonl
+    # run the prepared jobs on any served model; the CPU batch runner this
+    # line used to name left with the dense side engine (TT-142 slice (b))
     python3.13 benchmark/side_engine_tasks.py --score done.jsonl
 
 **Accuracy alone is not the result.** A model that always answers NO scores
