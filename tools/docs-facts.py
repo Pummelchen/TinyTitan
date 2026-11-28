@@ -390,7 +390,11 @@ def python_suite_registration(root=None):
             )
     for name in sorted(named - set(suites)):
         lines.append(f"FAIL {CI_WORKFLOW} names {name} and no benchmark/{name}.py is tracked")
-    return lines, len(suites) - len(exempt), len(exempt)
+    # Registered means *named in CI and tracked*, not "not exempt": a suite that
+    # is in neither list produced a FAIL above and must not inflate the count the
+    # summary prints (and that AGENTS.md quotes). The total is every tracked suite,
+    # so an unregistered one keeps the ratio honest instead of shrinking it away.
+    return lines, len(named & set(suites)), len(exempt), len(suites)
 
 
 def golden_target_count():
@@ -619,7 +623,7 @@ def main():
     modes, checks, problems = gate_set()
     docs, everything, listing = tracked_docs()
     rows = list(problems) + list(listing)
-    suite_lines, suites_registered, suites_exempt = python_suite_registration()
+    suite_lines, suites_registered, suites_exempt, suites_tracked = python_suite_registration()
     rows += suite_lines
     if not checks:
         rows.append("FAIL tools/lint.sh: derived no checks from the all chain")
@@ -649,7 +653,7 @@ def main():
     summary = (
         f"{len(docs)} documents against {len(checks)} gates derived "
         f"from tools/lint.sh, table shape in all {len(everything)}; "
-        f"{suites_registered}/{suites_registered + suites_exempt} python suites registered in CI; "
+        f"{suites_registered}/{suites_tracked} python suites registered in CI; "
         f"{len(owner)} owner-file note(s) reported and not enforced"
     )
     if fails:

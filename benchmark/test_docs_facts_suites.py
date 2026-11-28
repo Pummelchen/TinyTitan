@@ -98,22 +98,27 @@ class SuiteRegistrationTests(unittest.TestCase):
 
     def listed(self, result):
         """The FAIL lines out of `python_suite_registration`'s answer, whether the
-        caller unpacked the (lines, registered, exempt) tuple or passed it whole."""
+        caller unpacked the (lines, registered, exempt, tracked) tuple or passed it whole."""
         lines = result[0] if isinstance(result, tuple) else result
         return [line for line in lines if line.startswith("FAIL")]
 
     def test_a_registered_suite_reports_nothing(self):
         self.fixture = Fixture(step("test_alpha"), suites=["test_alpha"])
-        lines, registered, exempt = self.fixture.result()
+        lines, registered, exempt, tracked = self.fixture.result()
         self.assertEqual(self.listed(lines), [], lines)
-        self.assertEqual((registered, exempt), (1, 0))
+        self.assertEqual((registered, exempt, tracked), (1, 0, 1))
 
     def test_an_unregistered_suite_is_named(self):
         self.fixture = Fixture(step("test_alpha"), suites=["test_alpha", "test_beta"])
-        lines, _, _ = self.fixture.result()
+        lines, registered, exempt, tracked = self.fixture.result()
         fails = self.listed(lines)
         self.assertEqual(len(fails), 1, lines)
         self.assertIn("benchmark/test_beta.py", fails[0])
+        # The count the summary prints is the suites CI actually runs. The old
+        # arithmetic ("tracked minus exempt") counted the unregistered suite as
+        # registered, so the line read 2/2 while the FAIL above named test_beta
+        # (AUD-0110).
+        self.assertEqual((registered, exempt, tracked), (1, 0, 2), lines)
 
     def test_an_exemption_with_a_reason_is_accepted(self):
         self.fixture = Fixture(
@@ -121,9 +126,9 @@ class SuiteRegistrationTests(unittest.TestCase):
             suites=["test_alpha", "test_needs_model"],
             exemptions="test_needs_model\tstarts a server; a model run, never fetched in CI\n",
         )
-        lines, registered, exempt = self.fixture.result()
+        lines, registered, exempt, tracked = self.fixture.result()
         self.assertEqual(self.listed(lines), [], lines)
-        self.assertEqual((registered, exempt), (1, 1))
+        self.assertEqual((registered, exempt, tracked), (1, 1, 2))
 
     def test_an_exemption_without_a_reason_fails(self):
         self.fixture = Fixture(
@@ -194,9 +199,9 @@ class SuiteRegistrationTests(unittest.TestCase):
             "          python3 -m unittest test_alpha \\\n            test_beta\n",
             suites=["test_alpha", "test_beta"],
         )
-        lines, registered, exempt = self.fixture.result()
+        lines, registered, exempt, tracked = self.fixture.result()
         self.assertEqual(self.listed(lines), [], lines)
-        self.assertEqual((registered, exempt), (2, 0))
+        self.assertEqual((registered, exempt, tracked), (2, 0, 2))
 
     def test_a_name_in_a_comment_registers_nothing(self):
         """A mention is not a run. The workflow's own comment about a suite family is
@@ -213,7 +218,7 @@ class SuiteRegistrationTests(unittest.TestCase):
     def test_this_repository_is_registered(self):
         """The arm has to be true of the tree it ships in, or it is a fixture that
         flatters itself."""
-        lines, registered, exempt = module.python_suite_registration(root=str(REPO))
+        lines, registered, exempt, tracked_count = module.python_suite_registration(root=str(REPO))
         self.assertEqual([line for line in lines if line.startswith("FAIL")], [], lines)
         tracked = subprocess.run(
             ["git", "ls-files", "benchmark/test_*.py"],
@@ -223,6 +228,7 @@ class SuiteRegistrationTests(unittest.TestCase):
             check=True,
         ).stdout.splitlines()
         self.assertEqual(registered + exempt, len(tracked), (registered, exempt, tracked))
+        self.assertEqual(tracked_count, len(tracked), (tracked_count, len(tracked)))
         self.assertGreaterEqual(registered, 29)
 
 
