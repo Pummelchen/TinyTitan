@@ -49,7 +49,7 @@ Reviewed 2026-11-27 at `84006bb8`:
 |---|---|---|---|---|---|---|---|---|---|---|
 | `TinyTitanKernelsC` | A | ~1.9k | R | – | R | R | P | R | N | every `.c` and header read line-by-line 2026-11-27; AUD-0078/0079/0080 fixed, AUD-0085 open; bench numbers exist for L5 but no review |
 | `TinyTitanCore/Metal` (kernels) | A | — | P | – | R | R | – | R | N | every kernel family read line-by-line 2026-11-27 (attention, rmsnorm, gdn, kv-quant, dequant, gguf, logit/sampling, rope, utility, folded/fused, tensorops, qsa, depth_decode, drafthead, short_conv, relative_attention, ple); `logit`/`rope`/`utility`/`fused`/`qsa`/`drafthead` verified clean, the rest carried AUD-0082/0091/0092/0093/0094/0096 |
-| `TinyTitanCore` (Swift) | A | 10.3k | P | P | P | P | – | P | N | `JSONValue`/schema/grammar, manifest reader, format types, `Sampling`, `ChatDialect` read; AUD-0065/0077/0086 fixed, AUD-0084 open. The 2026-11-28 pass read `JSONGrammar`, `JSONGrammar+NumbersAndStrings` and `JSONConstraint` end-to-end (their 17 structured-output tests green), plus `PromptCheckpointPlanner`, `PromptCheckpointStore+Disk` and `AnthropicBuilder`: no defect found in those bodies. Still unread: tokenizer internals and `Generation/*` beyond schema/grammar. The checkpoint store is read in full — main file, `Types`, `Shared`, `+SharedSystem`, `+Disk`, `+Maintenance` and the planner — with no defect found: the shared-instance race, the crash-window backup restore, the quarantine-on-corrupt rule and the two-tier ledger all hold under its 48 tests |
+| `TinyTitanCore` (Swift) | A | 10.3k | P | P | P | P | – | P | N | `JSONValue`/schema/grammar, manifest reader, format types, `Sampling`, `ChatDialect` read; AUD-0065/0077/0086 fixed, AUD-0084 open. The 2026-11-28 pass read `JSONGrammar`, `JSONGrammar+NumbersAndStrings` and `JSONConstraint` end-to-end (their 17 structured-output tests green), plus `PromptCheckpointPlanner`, `PromptCheckpointStore+Disk` and `AnthropicBuilder`: no defect found in those bodies. The tokenizer internals — `Tokenizer`, `+Helpers`, `+Loading`, `+ChatMLTemplate`, `Detokenizer`, `TokenizerTypes` and `UTF8Text` — were read end-to-end on 2026-11-28 with no defect found: the ByteLevel inverse map, the partial-scalar holdback, the added-token barrier rules, the load coordinator and the manual ChatML renderer all match their documented contracts. Still unread: `Generation/*` beyond schema/grammar. The checkpoint store is read in full — main file, `Types`, `Shared`, `+SharedSystem`, `+Disk`, `+Maintenance` and the planner — with no defect found: the shared-instance race, the crash-window backup restore, the quarantine-on-corrupt rule and the two-tier ledger all hold under its 48 tests |
 | `TinyTitanFormat` | A | 2.9k | R | P | R | R | – | R | N | manifest/format/index/layout/RANS/GGUF-header readers read; AUD-0074 closed by using its validator in the verifier; `SSDAIBlockEncodingV1`, `SSDAIVariantGeometryV1`, `Inkling2*` arch types skimmed |
 | `Engines/Ornith35B4Bit` | A | 55.6k | P | R | R | P | P | R | N | runtime bodies (`RealForwardRunner+*`, prefetch ring, expert cache/slot accounting, host-streaming prefill) read line-by-line 2026-11-27 and the two siblings diffed against it; AUD-0088/0089/0090 recorded; the plugin surface and `Model+Validation` skimmed |
 | `Engines/DenseGPU` | A | 55.4k | P | P | P | P | P | P | N | runtime diffed against Ornith (10 files differ, none in the reviewed seams) so the runtime findings apply unchanged; `RoPE.swift` read (AUD-0084 fixed) |
@@ -98,12 +98,11 @@ Three read-only reviews plus the manager's own pass, at `92abaf92`–`84006bb8`:
 
 ## Residual, stated plainly
 
-- The `–` and `P` cells above are what no one has read end-to-end: the
-  tokenizer internals and `Generation/*` beyond schema/grammar. Everything else
-  this pass named is read: the Metal kernels per the row above, the
-  `TinyTitanBench` harness arms, the two `tools/` files, the JSON
-  grammar/constraint, the whole checkpoint store, `AnthropicBuilder` and the
-  Anthropic request mapper.
+- The `–` and `P` cells above are what no one has read end-to-end:
+  `Generation/*` beyond schema/grammar. Everything else this pass named is read:
+  the Metal kernels per the row above, the `TinyTitanBench` harness arms, the two
+  `tools/` files, the JSON grammar/constraint, the tokenizer internals, the
+  whole checkpoint store, `AnthropicBuilder` and the Anthropic request mapper.
   The 6.x MoE bodies this bullet used to carry are gone (TT-142 slice (a)), and
   the two install scripts it used to name are now read in full (AUD-0106/0107).
 - The findings this pass produced are the tracker rows AUD-0066…0101; what is
