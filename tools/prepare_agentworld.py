@@ -1,8 +1,9 @@
 #!/usr/bin/env python3.13
-"""Convert a Qwen3.5-MoE 35B-A3B release (Qwen-AgentWorld, Qwen3.6) from its
-bf16 checkpoint into the affine 4-bit or 8-bit snapshot TinyTitanRepack installs.
+"""Convert a Qwen3.5-MoE 35B-A3B release -- the shipped Ornith 1.5 35B-A3B --
+from its bf16 checkpoint into the affine 4-bit or 8-bit snapshot
+TinyTitanRepack installs.
 
-AgentWorld's text model is the Qwen3.5-MoE 35B-A3B geometry this runtime
+Its text model is the Qwen3.5-MoE 35B-A3B geometry this runtime
 already runs as the `qwen36` family (2048 hidden, 40 layers, 256 experts at
 top-8, gated-DeltaNet with full attention every fourth layer). What differs
 is the source: Qwen ships it as bf16 under the vision wrapper's tensor names,
@@ -22,9 +23,9 @@ install TinyTitanRepack writes afterwards is a second copy of the output.
 
     python3.13 tools/prepare_agentworld.py --plan            # no download
     python3.13 tools/prepare_agentworld.py --bits 4 \\
-        --output .build/agentworld-affine-4bit --work .build/agentworld-shards
+        --output .build/ornith-affine-4bit --work .build/ornith-shards
     python3.13 tools/prepare_agentworld.py --bits 4 8 \\
-        --output .build/agentworld-affine --work .build/agentworld-shards
+        --output .build/ornith-affine --work .build/ornith-shards
         # one download, two snapshots: <output>-4bit and <output>-8bit
 
 Kept at the checkpoint's own bf16 in both widths -- "low-cost data at
@@ -73,34 +74,16 @@ except ImportError as exc:  # pragma: no cover - environment, not logic
         "   selects the interpreter that tools/install_models.sh runs these\n"
         "   files with, and this file does not read it)"
     )
-# Every Qwen3.5-MoE 35B-A3B release this converter builds. Pinned commits:
-# the install receipt records the source, and a moved `main` must not
-# silently change what "AgentWorld 4-bit" means.
+# The Qwen3.5-MoE 35B-A3B release this converter builds. Pinned commit: the
+# install receipt records the source, and a moved `main` must not silently
+# change what "Ornith 1.5 35B-A3B 4-bit" means. The AgentWorld, Qwen3.6,
+# KAT-Coder and Ornith-122B entries this table used to carry left with TT-142
+# (their installs are not shipped and the installer cannot dispatch them).
 MODELS = {
-    "agentworld": ("Qwen/Qwen-AgentWorld-35B-A3B", "60d2b0434a53d2e62a7c00a489586815d94ebffb"),
-    "qwen36": ("Qwen/Qwen3.6-35B-A3B", "995ad96eacd98c81ed38be0c5b274b04031597b0"),
     "ornith15": ("ornith-ai/Ornith-1.5-35B-A3B", "10fbf86fed7ecee4a061f8b499a618f46001cac1"),
-    # KAT-Coder-V2.5-Dev is a Qwen3.6-35B-A3B fine-tune, so it has the same
-    # geometry and the same tensor names (`model.language_model.*`, `lm_head`)
-    # as the three above -- verified against its own index rather than assumed:
-    # 31,333 tensors, none outside the namespaces this converter knows, no
-    # `model.visual.*` and no `mtp.*`, so `skipped()` removes nothing here. Its
-    # config declares a `vision_config` and the multimodal wrapper, which is why
-    # the checkpoint was checked for vision tensors rather than trusted to lack
-    # them.
-    "katcoder": ("Kwaipilot/KAT-Coder-V2.5-Dev", "7be56fe773e72b6f5ca93c1ae45d828ddb893922"),
-    # Ornith-1.5-122B: the largest member of the family, the same text
-    # architecture at a wider geometry (hidden 3072, 48 layers, 256 experts at
-    # top-8, F=1024, 32 Q / 2 KV heads, 16 GDN K / 64 V heads). Verified
-    # against the pinned index rather than assumed: 1,949 tensors, of which 333
-    # are `model.visual.*` and 785 are `mtp.*` (both skipped, as on every other
-    # member), leaving 830 text tensors plus the untied `lm_head`. The routed
-    # experts are fused per layer, so this is the same conversion path as
-    # Ornith-1.5-35B-A3B -- no per-expert stacking.
-    "ornith122": ("ornith-ai/Ornith-1.5-122B", "7681ef608624e7532d8164128bcffdbdbaf1b1af"),
 }
-REPO = MODELS["agentworld"][0]
-COMMIT = MODELS["agentworld"][1]
+REPO = MODELS["ornith15"][0]
+COMMIT = MODELS["ornith15"][1]
 BASE = f"https://huggingface.co/{REPO}/resolve/{COMMIT}"
 
 
@@ -1209,7 +1192,7 @@ def main() -> int:
     ap.add_argument(
         "--model",
         choices=sorted(MODELS),
-        default="agentworld",
+        default="ornith15",
         help="which release to convert (pinned repo and commit)",
     )
     ap.add_argument(
