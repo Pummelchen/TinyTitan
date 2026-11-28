@@ -69,11 +69,32 @@ the declared `io_status` buffer and `useResource` on the blobs did not change
 it, so the harness or the kernel's shape binding is wrong; the `moe` GB/s and
 the `gpu.routed_moe_gbps` row it feeds are therefore unverified.
 
+## Inkling: the KV precision is the biggest single lever
+
+Both Inklings are read at the shipped default `--kv-bits 8`. The NVFP4 install
+does not merely lose a few percent:
+
+| install | kv-bits | new tokens | decode tok/s |
+| --- | ---: | ---: | ---: |
+| Inkling 2 Mini NVFP4 | 8 (default) | 32 | 3.6 |
+| Inkling 2 Mini NVFP4 | 4 | 32 | 8.1 |
+| Inkling 2 Mini NVFP4 | 16 | 32 | 0.8 |
+| Inkling 2 Mini UD-Q4_K_XL | 8 | 64 | 10.7 |
+| Inkling 2 Mini UD-Q4_K_XL | 4 | 64 | 11.2 |
+
+The recorded README figure for NVFP4 is 8.1 tok/s, i.e. what the 4-bit cache
+gives — so the 8-bit cache path (`kv_finish_q8` / `attention_*_q8`) is the
+outlier, not the machine. Its output is coherent (`kv-bits 4` answers "Paris"),
+but 4-bit KV is a precision change and cannot become the default without the
+quality evidence the profile table asks for.
+
 ## Next targets
 
 1. The `moe_phase1_hit -> miss_fixup` gap: start miss loads earlier or widen
    the overlap window, so the phase-1 hit pass covers their latency.
 2. The `shared_expert -> routed` gap: take host encoding of the routed buffer
    off the critical path (it is ~11 ms of the 70 ms token).
-3. Inkling NVFP4 at 3.1 tok/s against a recorded 8.1 needs its own stall map;
-   it is the largest single gap in the shipped matrix.
+3. Inkling NVFP4 at 3.1 tok/s against a recorded 8.1 is the largest single gap
+   in the shipped matrix, and it is the 8-bit KV path: profile `kv_finish_q8`
+   and the q8 attention kernel against their q4 counterparts, then fix the slow
+   one. Making 4 the default is a precision change and needs its quality check.
