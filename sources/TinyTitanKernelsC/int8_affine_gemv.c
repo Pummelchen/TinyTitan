@@ -116,7 +116,7 @@ void tinytitan_int8_affine_gemv(const uint8_t *weights,
             // 4-bit kernel's: there every lane chains all sixteen of its
             // products into one accumulator. Same products, different
             // association, so the two widths disagree in the last bit on most
-            // rows -- measured when the SWIG wrapper's tests existed, and
+            // rows -- measured when the Swift wrapper's tests existed, and
             // asserted nowhere as an equality. What the widths share is the
             // *factoring* below.
             const float32x4_t dot = vaddq_f32(vaddq_f32(d0, d1), vaddq_f32(d2, d3));
