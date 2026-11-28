@@ -50,7 +50,11 @@ case "${3:-}" in
     exit 2
     ;;
 esac
-if [ "$#" -gt 3 ] && [ -z "$ALLOW_REASON" ]; then
+if [ "$#" -gt 4 ]; then
+  echo "error: too many arguments (want <owner/repo> <full-commit-sha> [--allow-red \"<reason>\"])" >&2
+  exit 2
+fi
+if [ "${3:-}" = "--allow-red" ] && [ -z "$ALLOW_REASON" ]; then
   echo "error: --allow-red needs a non-empty reason; a release over a red CI must say why" >&2
   exit 2
 fi

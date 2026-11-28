@@ -197,6 +197,37 @@ class CiGreenTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("non-empty reason", result.stderr)
 
+    def test_allow_red_without_a_reason_is_refused_even_as_the_last_argument(self) -> None:
+        # The reason check was `$# -gt 3`, so `--allow-red` as the last argument
+        # was the one shape it never saw. On a green run that exited 0 with an
+        # override the rule says must carry a reason; on a red one the operator
+        # was told to use the flag they had just used (AUD-0109).
+        green = "CI\tcompleted\tsuccess\thttps://x/1\n"
+        result = run(REPO, FULL_SHA, "--allow-red", fixture=green)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("non-empty reason", result.stderr)
+        self.assertNotIn("result\t", result.stdout)
+
+    def test_allow_red_without_a_reason_is_not_a_plain_red_refusal(self) -> None:
+        # The operator needs to be told the override was incomplete, not that CI
+        # is red and they should try the flag they already passed.
+        result = run(REPO, FULL_SHA, "--allow-red", fixture="CI\tcompleted\tfailure\thttps://x/9\n")
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("non-empty reason", result.stderr)
+        self.assertNotIn("use --allow-red", result.stderr)
+
+    def test_a_fifth_argument_is_refused(self) -> None:
+        result = run(
+            REPO,
+            FULL_SHA,
+            "--allow-red",
+            "flake in the runner image",
+            "extra",
+            fixture="CI\tcompleted\tsuccess\thttps://x/1\n",
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("too many arguments", result.stderr)
+
     def test_an_unrecognised_option_is_refused(self) -> None:
         result = run(REPO, FULL_SHA, "--force", fixture="")
         self.assertEqual(result.returncode, 2)
