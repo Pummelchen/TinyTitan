@@ -37,13 +37,14 @@ struct InklingQ4LoadPlanTests {
         #expect(plan.plannedBytes <= 4 * Self.gib)
     }
 
-    @Test func noBudgetUsesTheDefaultExpertMemory() throws {
+    @Test func noBudgetUsesTheMeasuredSlotDefault() throws {
         let plan = try InklingQ4LoadPlan.make(
             geometry: Self.geometry, requested: 32_768, ramBudget: nil, explicitSlots: nil,
             workingSet: Self.workingSet)
         #expect(plan.context == 32_768)
-        // 8 GiB / 123,666,432 bytes a slot.
-        #expect(plan.slots == 69)
+        // 96 slots, the measured default; the 8 GiB cap (69) is the fallback
+        // when the working set cannot hold it (AUD-0123).
+        #expect(plan.slots == 96)
     }
 
     @Test func explicitSlotsWinButStayWithinTheExpertCount() throws {
@@ -91,6 +92,26 @@ struct InklingQ4LoadPlanTests {
             geometry: Self.geometry, requested: 262_144, ramBudget: nil,
             explicitSlots: nil, workingSet: Self.workingSet, maxContextExplicit: true)
         #expect(plan.context == 262_144)
+    }
+
+    @Test func aNoBudgetDefaultPicksTheMeasuredNinetySixWhenItFits() throws {
+        // 96 slots measured 12.1-12.6 tok/s on this 24 GB M3 against 69 at
+        // 10.5; 112 swapped. The GPU's working set is the fit guard, so a
+        // smaller Mac keeps the old count (AUD-0123).
+        let deviceSet = 19 << 30
+        let plan = try InklingQ4LoadPlan.make(
+            geometry: Self.geometry, requested: 262_144, ramBudget: nil,
+            explicitSlots: nil, workingSet: deviceSet, maxContextExplicit: false)
+        #expect(plan.slots == 96)
+    }
+
+    @Test func aSmallWorkingSetKeepsTheEightGiBDefault() throws {
+        let smallSet = 13 << 30
+        let plan = try InklingQ4LoadPlan.make(
+            geometry: Self.geometry, requested: 262_144, ramBudget: nil,
+            explicitSlots: nil, workingSet: smallSet, maxContextExplicit: false)
+        #expect(plan.slots < 96)
+        #expect(plan.plannedBytes <= smallSet)
     }
 
     @Test func perSlotBytesReflectsWindowKVAndFixedState() throws {

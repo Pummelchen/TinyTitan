@@ -19,6 +19,7 @@ package struct InklingQ4LoadPlan: Equatable, Sendable {
     package static let minimumContext = 4_096
     /// Expert memory when no `--ram-budget` is given: the same default the
     /// shipped streaming variant uses for its expert cache.
+    /// Expert-cache bytes a no-budget launch may use.
     package static let defaultExpertBytes = 8 << 30
 
     package let context: Int
@@ -145,7 +146,20 @@ package struct InklingQ4LoadPlan: Equatable, Sendable {
             min(targetContext, g.modelContext, fits) / 1_024 * 1_024, minimumContext)
         let left = ceiling - fixed - context * g.bytesPerPosition
         var slots = left / max(g.bytesPerSlot, 1)
-        if ramBudget == nil { slots = min(slots, defaultExpertBytes / max(g.bytesPerSlot, 1)) }
+        if ramBudget == nil {
+            // The Q4 install measured 96 slots at 12.1 tok/s against the 69
+            // the 8 GiB default derives (10.5). Raise to that rung only when
+            // its planned footprint still fits the GPU's own working set: on a
+            // smaller Mac the guard keeps the old count instead of paging
+            // (AUD-0123).
+            let preferred = 96
+            let planned = fixed + preferred * g.bytesPerSlot + context * g.bytesPerPosition
+            if preferred <= g.experts, planned <= workingSet {
+                slots = min(slots, preferred)
+            } else {
+                slots = min(slots, defaultExpertBytes / max(g.bytesPerSlot, 1))
+            }
+        }
         if let explicitSlots { slots = explicitSlots }
         slots = max(minimumSlots, min(slots, g.experts))
         return InklingQ4LoadPlan(

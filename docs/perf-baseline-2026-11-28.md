@@ -88,6 +88,23 @@ prompt and 128 new tokens:
 An explicit `--max-context 262144` is still honoured; two tests per plugin pin
 the implicit cap and the explicit request.
 
+## Fix 2 — the Q4 install's expert-slot default (AUD-0123)
+
+The no-budget plan capped slots at 8 GiB (69 slots for the Q4 install). A paired
+run on this 24 GB M3 measured 96 slots at **12.1-12.6 tok/s** against 69 at
+10.5; 112 slots already pushed the process into swap (3.6). The default now
+picks 96 when its planned footprint fits the GPU's working set, and keeps the
+8 GiB fallback when it does not, so a smaller Mac does not page.
+
+| install | before | after |
+| --- | ---: | ---: |
+| Inkling 2 Mini UD-Q4_K_XL (default flags) | 10.45-10.51 | **12.56, 12.61** |
+| Inkling 2 Mini NVFP4 (unchanged) | 7.94 | 7.94 |
+
+`tools/golden-baseline.sh --check inkling2-gguf-q4` reports
+`ok — output identical to baseline`; two tests pin the 96-slot default and the
+small-working-set fallback.
+
 ## Inkling: the KV precision is the biggest single lever
 
 Both Inklings are read at the shipped default `--kv-bits 8`. The NVFP4 install
