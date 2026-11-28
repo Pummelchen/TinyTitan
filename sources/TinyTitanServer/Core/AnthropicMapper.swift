@@ -380,7 +380,13 @@ public enum AnthropicMapper {
         // per-request path the OpenAI surfaces use: `disabled` is off,
         // `enabled` maps its budget onto a rung, and `adaptive` (Claude Code's
         // every-turn default) leaves the server's setting alone.
-        let thinkingLevel = try requestedThinking(request.thinking, maxTokens: maxTokens)
+        // Validated against the client's own max_tokens, before the context
+        // clamp: Claude Code sends max_tokens at the model ceiling with a
+        // budget under it, and a smaller server window must not turn that
+        // valid pair into an invalid request (AUD-0118). The clamp still
+        // limits the generated tokens; the level is not a budget.
+        let thinkingLevel = try requestedThinking(
+            request.thinking, maxTokens: requestedMaxTokens)
         guard !request.messages.isEmpty else {
             throw invalid("at least one message is required", "messages")
         }

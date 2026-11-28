@@ -213,6 +213,25 @@ import Testing
     /// off, which made the same harness behave two ways depending on the API a
     /// client spoke. The HTTP-level test that the request really overrides the
     /// loaded profile lives in `ReasoningSurfaceTests`.
+    /// A server with a smaller window clamps the output cap; it must not also
+    /// invalidate the client's thinking budget.
+    ///
+    /// Claude Code sends `max_tokens` at the model's ceiling (32,000) and a
+    /// budget under it. The budget was checked against the *clamped* cap, so a
+    /// 16K-context server refused every thinking request it was sent — a
+    /// request that is valid on the client's own numbers (AUD-0118).
+    @Test func aClampedOutputCapDoesNotInvalidateTheThinkingBudget() throws {
+        let request = try decode(
+            """
+            {"model":"m","max_tokens":32000,
+             "thinking":{"type":"enabled","budget_tokens":16000},
+             "messages":[{"role":"user","content":"hi"}]}
+            """)
+        let chat = try AnthropicMapper.chatRequest(request, maxContext: 8192)
+        #expect(chat.maxTokens == 8192)
+        #expect(chat.reasoningEffort == ReasoningLevel.medium.rawValue)
+    }
+
     @Test func thinkingComesFromTheRequestAlone() throws {
         func effort(_ body: String) throws -> String? {
             try map(body).reasoningEffort
