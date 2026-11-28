@@ -10,12 +10,12 @@ import Testing
 /// then reported `samplerReturnedOutOfRangeToken` for an id the mask was
 /// documented to have excluded (AUD-0119).
 @Suite struct LogitMaskTests {
-    @Test func allowedIdsAreUntouchedAndDisallowedIdsAreFloored() {
+    @Test func allowedIdsAreUntouchedAndDisallowedIdsAreFloored() throws {
         var mask = LogitMask(vocab: 4)
         mask.insert(1)
         var half = [Float16](repeating: 0.5, count: 4)
-        half.withUnsafeMutableBufferPointer { buffer in
-            mask.apply(toLogits: buffer.baseAddress!, count: 4)
+        try half.withUnsafeMutableBufferPointer { buffer in
+            mask.apply(toLogits: try #require(buffer.baseAddress), count: 4)
         }
         #expect(half[1] == 0.5)
         #expect(half[0] == LogitMaskFloor.half)
@@ -28,12 +28,12 @@ import Testing
         #expect(single[3] == LogitMaskFloor.single)
     }
 
-    @Test func paddedRowsBeyondTheVocabularyAreFloored() {
+    @Test func paddedRowsBeyondTheVocabularyAreFloored() throws {
         var mask = LogitMask(vocab: 4)
         mask.insert(1)
         var half = [Float16](repeating: 0.5, count: 6)
-        half.withUnsafeMutableBufferPointer { buffer in
-            mask.apply(toLogits: buffer.baseAddress!, count: 6)
+        try half.withUnsafeMutableBufferPointer { buffer in
+            mask.apply(toLogits: try #require(buffer.baseAddress), count: 6)
         }
         #expect(half[4] == LogitMaskFloor.half)
         #expect(half[5] == LogitMaskFloor.half)
