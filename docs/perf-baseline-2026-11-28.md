@@ -124,6 +124,26 @@ outlier, not the machine. Its output is coherent (`kv-bits 4` answers "Paris"),
 but 4-bit KV is a precision change and cannot become the default without the
 quality evidence the profile table asks for.
 
+## Ornith: overlap attempts measured, none wins yet
+
+Paired 256-token rounds, `TINYTITAN_KERNEL_STATS=1`, same prompt:
+
+| configuration | busy share of decode | decode tok/s |
+| --- | ---: | ---: |
+| host sync, deferred submit (shipped) | 61.7-61.8% | 16.52-16.57 |
+| event sync, immediate submit | 61.5-61.9% | 16.52-16.59 |
+
+Moving the demand fetch **before** the phase-1 hit encode (always-immediate with
+host sync) made it worse -- 59.9-60.1% busy and 16.12-16.18 tok/s -- so the
+shipped deferred point is the better one and the change was reverted. Neither
+`TINYTITAN_ROUTER_TOPK_SIMD=0`, `TINYTITAN_ATTN_SIMD_PARTIAL=0`, both off, nor a
+4K window with 192/224/256 slots beat the default (15.4-16.5 tok/s; 256 slots
+13.9).
+
+The two gaps remain: the ~11 ms/token demand miss wait after phase-1 hit, and
+the ~11 ms/token host encode between the shared-expert and routed buffers. The
+next attempt has to pipeline host encoding across layers, not reorder the fetch.
+
 ## Next targets
 
 1. The `moe_phase1_hit -> miss_fixup` gap: start miss loads earlier or widen
