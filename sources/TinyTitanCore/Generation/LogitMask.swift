@@ -66,14 +66,19 @@ extension LogitMask {
     /// host, before the softmax front-end is encoded. Safe because the buffer
     /// belongs to the completed forward pass of the previous token.
     public func apply(toLogits logits: UnsafeMutablePointer<Float16>, count: Int) {
-        for index in 0..<min(count, vocab) where !contains(Int32(index)) {
+        // Floor the whole row, including any padded rows past `vocab`: an id at
+        // or above the vocabulary has no token and is never allowed, so leaving
+        // it at its model value lets the sampler pick it and the decode loop
+        // raises `samplerReturnedOutOfRangeToken` for a mask that claimed to
+        // have ruled it out (AUD-0119).
+        for index in 0..<count where index >= vocab || !contains(Int32(index)) {
             logits[index] = LogitMaskFloor.half
         }
     }
 
     /// Floor every disallowed entry of a CPU logits row in place.
     public func apply(toLogits logits: inout [Float]) {
-        for index in 0..<min(logits.count, vocab) where !contains(Int32(index)) {
+        for index in 0..<logits.count where index >= vocab || !contains(Int32(index)) {
             logits[index] = LogitMaskFloor.single
         }
     }
