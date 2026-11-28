@@ -256,22 +256,22 @@ discarded twice before a quiet window could be found.
 The tooling stays, and a record is worth taking when the machine is quiet:
 
 ```bash
-# on the release machine, with the release build and the 4B install present
+# on the release machine, with the release build and the Ornith 4-bit install present
 tools/internal-speeds.py --record --label vX.Y \
   --baseline benchmark/internal-speeds/<previous>.json
 ```
 
-It measures GPU kernel bandwidth (QKV GEMV, routed MoE, GDN in-projection), CPU
-int8 affine GEMV bandwidth, prefill and decode tok/s, time to first token, the
-effective decode bandwidth, and a quality proxy on the fixed prompt
-*"difference swift vs c++ in detail"*. The full field list is in
-`benchmark/internal-speeds/README.md`.
+It measures GPU kernel bandwidth (QKV GEMV, routed MoE, GDN in-projection),
+prefill and decode tok/s, time to first token, the effective decode bandwidth,
+and a quality proxy on the fixed prompt *"difference swift vs c++ in detail"*.
+The full field list is in `benchmark/internal-speeds/README.md`.
 
-**Records are per (model, prompt).** The mandatory record is the 4B; an ANE
-prefill number exists for any install whose family the sidecar exporter can
-describe — the qwen36 MoE family and the dense Qwen 3.5 family, since the
-exporter now reads its geometry from the model's manifest. Record such an
-install as an additional record when a sidecar is present:
+**Records are per (model, prompt).** The mandatory record is the shipped Ornith
+1.5 35B-A3B 4-bit install, which is the tool's default; an ANE prefill number
+exists for any install whose family the sidecar exporter can describe — the
+qwen36 MoE family, since the exporter reads its geometry from the model's
+manifest. Record such an install as an additional record when a sidecar is
+present:
 
 ```bash
 tools/internal-speeds.py --record --label vX.Y-<model> \
@@ -289,7 +289,7 @@ of a speedup. The ANE also requires a 4,096-token prefill chunk and a prompt tha
 fills one; a model left on a smaller chunk cannot reach it at all.
 
 With no `--baseline`, the comparison picks the newest previous record for the
-**same model and prompt**, so extra records never become the 4B's baseline. A
+**same model and prompt**, so extra records never become the default model's baseline. A
 model with no install is reported **not checked** — never fetched to fill a row.
 An ANE row with no sidecar is recorded not applicable, with the reason.
 
@@ -304,7 +304,7 @@ numerics change moves it, and `### Verification` should say so.
 
 Commit the new `benchmark/internal-speeds/<label>.json` with the release. Do
 not overwrite an older record: the diff against it is the point, and the record
-is only valid for one (machine, build, model) triple. If the 4B install is
+is only valid for one (machine, build, model) triple. If the Ornith install is
 absent, the step is reported as **not checked** like a missing golden — never
 "fixed" by installing a model for it, and never skipped silently.
 

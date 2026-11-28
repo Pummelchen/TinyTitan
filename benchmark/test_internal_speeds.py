@@ -140,6 +140,26 @@ class MissingAneReasonTests(unittest.TestCase):
         self.assertNotIn("export one", reason)
 
 
+class DefaultModelTests(unittest.TestCase):
+    """The record taken without `--model` is the shipped install.
+
+    It was the dense Qwen 3.5 4B, whose engines left with TT-142 slice (b). The
+    release runbook records the default, so that step measured a directory that
+    no longer exists while every other part of the release passed (AUD-0111).
+    The expected directory is read from the installer menu, so a rename moves
+    both together instead of leaving a literal behind.
+    """
+
+    def test_the_default_is_the_installer_catalogue_default(self):
+        catalogue = (ROOT / "tools/install_models.sh").read_text(encoding="utf-8")
+        block = catalogue.split("CATALOGUE=(", 1)[1].split("\n)", 1)[0]
+        row = next(line for line in block.splitlines() if line.strip().startswith('"ornith15|'))
+        directory = row.strip().strip('"').split("|")[1]
+        self.assertEqual(directory, "ornith-1.5_35B_A3B_4Bit", row)
+        self.assertEqual(internal_speeds.DEFAULT_MODEL, f"models/{directory}")
+        self.assertNotIn("qwen3.5_4B_4Bit", internal_speeds.DEFAULT_MODEL)
+
+
 class NewestBaselineTests(unittest.TestCase):
     def setUp(self):
         self.dir = pathlib.Path(tempfile.mkdtemp())

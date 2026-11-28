@@ -6,18 +6,16 @@ to `benchmark/internal-speeds/<label>.json`, so the next release can be diffed
 against this one and a speed regression is caught before it ships:
 
   GPU   fused QKV GEMV, routed MoE and GDN in-projection bandwidth (GB/s)
-  CPU   int8 affine GEMV bandwidth (GB/s) at every thread width
   model prefill tok/s, decode tok/s, TTFT, total seconds, and the effective
         decode bandwidth (weight bytes / decode seconds)
   ANE   prefill tok/s when the model ships an ANE sidecar; recorded as not
-        applicable with the reason otherwise (the sidecar exporter is
-        qwen36-only, so a dense install cannot have one)
+        applicable with the reason otherwise
   text  the response, its SHA-256, and a small quality proxy: length, keyword
         coverage and trigram repetition
 
 Usage:
   tools/internal-speeds.py --record [--label v5.6]
-      [--model models/qwen3.5_4B_4Bit] [--max-new 256]
+      [--model models/ornith-1.5_35B_A3B_4Bit] [--max-new 256]
       [--baseline benchmark/internal-speeds/<previous>.json]
   tools/internal-speeds.py --compare <baseline.json> <candidate.json>
       [--threshold 10]
@@ -27,10 +25,12 @@ comparison, and exits non-zero when a performance metric regressed by more than
 the threshold. That is the release gate; see docs/release-process.md.
 
 Records are per (model, prompt): with no `--baseline`, the comparison picks the
-newest previous record **for the same model and prompt**, because a 125B MoE's
-decode rate is not a baseline for the 4B's. Different models are recorded side
-by side — the ANE prefill number only exists for a qwen36 install with a
-sidecar — and are never compared against one another.
+newest previous record **for the same model and prompt**, because one model's
+decode rate is not a baseline for another's. Different models are recorded side
+by side — the ANE prefill number only exists for an install with a sidecar —
+and are never compared against one another. The default model is the shipped
+Ornith 1.5 35B-A3B 4-bit install, which is what the release runbook records
+when it names no `--model`.
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ BENCH = ROOT / ".build/release/TinyTitanBench"
 CLI = ROOT / ".build/release/TinyTitanCLI"
 RESULTS = ROOT / "benchmark/internal-speeds"
 
-DEFAULT_MODEL = "models/qwen3.5_4B_4Bit"
+DEFAULT_MODEL = "models/ornith-1.5_35B_A3B_4Bit"
 DEFAULT_PROMPT = "difference swift vs c++ in detail"
 DEFAULT_MAX_NEW = 256
 DEFAULT_THRESHOLD = 10.0
@@ -514,8 +514,8 @@ def default_label(describe: str, model: str) -> str:
     mandatory one.
 
     Two models recorded at the same commit must not resolve to one file — the
-    4B's record is the release gate's baseline and must not be overwritten by an
-    extra model's.
+    default model's record is the release gate's baseline and must not be
+    overwritten by an extra model's.
     """
     if model == DEFAULT_MODEL:
         return describe

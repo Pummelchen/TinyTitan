@@ -25,7 +25,6 @@ exit is the release gate; see `docs/release-process.md`.
 | `gpu.qkv_gemv_gbps` | the gated QKV GEMV (the dominant decode kernel), synthetic buffers |
 | `gpu.routed_moe_gbps` | the routed-MoE decode kernels at the real shapes |
 | `gpu.gdn_inproj_gbps` | the gated-DeltaNet in-projection GEMV |
-| `cpu.best_gbps` | int8 affine GEMV on the CPU at its best thread width, with the full table |
 | `generation.prefill_tokens_per_second` | prompt tokens / prefill seconds |
 | `generation.decode_tokens_per_second` | the CLI's own decode rate |
 | `generation.ttft_seconds` | time to first token = prefill seconds (the first token is sampled at the end of prefill) |
@@ -42,44 +41,40 @@ the response text is stored so a human can read the one release where it drops.
 
 ## Which model
 
-The default is the dense Qwen 3.5 4B (`models/qwen3.5_4B_4Bit`) because it is
-the smallest install that exercises every path, and it is what the release gate
-records. Records are per (model, prompt), so other models can be recorded beside
-it without becoming its baseline:
+The default is the shipped Ornith 1.5 35B-A3B 4-bit install
+(`models/ornith-1.5_35B_A3B_4Bit`), which is what the release runbook records
+when it names no `--model`. Records are per (model, prompt), so the Inklings can
+be recorded beside it without becoming its baseline:
 
 ```bash
-tools/internal-speeds.py --record --label v5.6-4b
-tools/internal-speeds.py --record --label v5.6-agentworld \
-  --model models/qwen-agentworld_35B_A3B_4Bit
+tools/internal-speeds.py --record --label v5.6
+tools/internal-speeds.py --record --label v5.6-inkling \
+  --model models/inkling-2-mini_NVFP4
 ```
 
 Without `--label`, the file is named from `git describe` — bare for the default
 model, and suffixed with the model's directory name for any other, so a second
-model can never overwrite the 4B's record.
+model can never overwrite the default model's record.
 
 **The ANE row needs a sidecar, and a sidecar needs a family the graph can
 describe.** `tools/export_ane_prefill.py` reads the attention geometry from the
-model's own manifest, so it serves the qwen36 MoE family, the dense Qwen 3.5
-family and Qwen 3.8. The last of those selects keys with a QSA indexer rather
-than computing different arithmetic, and the runtime folds that selection into
-the additive mask the sidecar already takes as an input, so the graph is
-unchanged — and it is still **not installed**, because it was measured: the ANE
-runs 0.72× the GPU's prefill on that model, since the GPU already attends to only
-the indexer's ~2,051 selected keys while the ANE graph is dense over the context.
-The family left out entirely is the one-layer MTP draft, which is verified rather
-than prefilled on the ANE. The record says which of the two it is rather than
-quoting a number the model would never produce.
+model's own manifest; none of the three shipped installs carries a sidecar, so
+their ANE row is recorded as not applicable, with the family and the reason. The
+qwen36 MoE family is exportable, and Qwen 3.8 is exportable but **not
+installed**, because it was measured: the ANE runs 0.72× the GPU's prefill on
+that model, since the GPU already attends to only the indexer's ~2,051 selected
+keys while the ANE graph is dense over the context. The family left out entirely
+is the one-layer MTP draft, which is verified rather than prefilled on the ANE.
 
 The ANE also needs a **4,096-token prefill chunk** and a prompt that fills one:
-a shorter prompt is one partial chunk and deliberately stays on the GPU, and the
-dense family is on 4,096 by default for exactly this reason. Export first, then
-record:
+a shorter prompt is one partial chunk and deliberately stays on the GPU. For an
+install that has a sidecar, record it with that chunk:
 
 ```bash
 ~/.venvs/coreml-py311/bin/python tools/export_ane_prefill.py \
-  --model models/qwen3.5_4B_4Bit --max-history 12288
-tools/internal-speeds.py --record --label v5.6-4b \
-  --model models/qwen3.5_4B_4Bit
+  --model <install> --max-history 12288
+tools/internal-speeds.py --record --label v5.6-ane \
+  --model <install>
 ```
 
 The sidecar lives in the model directory (`<model>/ane_prefill/`) and is not in
