@@ -28,6 +28,39 @@ extension TinyTitanBench {
         var downB: UInt32
     }
 
+    /// Which dispatches a `runMoE` mode issues and the weight bytes one
+    /// iteration reads. Pure, so a mode name cannot quietly pick up another
+    /// arm's work: "moe_phase1_subset" starts with "moe_phase1" and used to
+    /// match the prefix test, so it dispatched the production phase-1 kernel
+    /// *after* the subset kernel and reported both kernels' bytes as the
+    /// subset's rate (AUD-0113).
+    struct MoEMeasurementPlan: Equatable {
+        let runsPhase1: Bool
+        let runsPhase2: Bool
+        let runsSubset: Bool
+        let bytes: UInt64
+
+        static func make(
+            kernelName: String, topK: UInt32, D: UInt32, F: UInt32, activeCount: UInt32
+        ) -> MoEMeasurementPlan {
+            let phase1Bytes = UInt64(Int(topK) * 2 * Int(F) * Int(D) / 2)
+            let phase2Bytes = UInt64(Int(topK) * Int(D) * Int(F) / 2)
+            let subsetBytes = UInt64(Int(activeCount) * 2 * Int(F) * Int(D) / 2)
+            let runsSubset = kernelName == "moe_phase1_subset"
+            let runsPhase1 =
+                kernelName == "moe"
+                || (kernelName.hasPrefix("moe_phase1") && !runsSubset)
+            let runsPhase2 = kernelName == "moe_phase2" || kernelName == "moe"
+            var bytes: UInt64 = 0
+            if runsPhase1 { bytes += phase1Bytes }
+            if runsPhase2 { bytes += phase2Bytes }
+            if runsSubset { bytes += subsetBytes }
+            return MoEMeasurementPlan(
+                runsPhase1: runsPhase1, runsPhase2: runsPhase2,
+                runsSubset: runsSubset, bytes: bytes)
+        }
+    }
+
     /// Routed-MoE decode kernels at the real 4-bit shapes. Weights are the
     /// metric: phase-1 reads gate+up (8 x 2 x F*D/2 bytes), phase-2 reads
     /// down (8 x D*F/2 bytes). The combined "moe" mode dispatches both in
@@ -191,10 +224,12 @@ extension TinyTitanBench {
         guard let enc = cb.makeComputeCommandEncoder() else {
             fatalError("could not create compute encoder")
         }
-        let runPhase1 = kernelName == "moe" || kernelName.hasPrefix("moe_phase1")
+        let plan = MoEMeasurementPlan.make(
+            kernelName: kernelName, topK: topK, D: D, F: F, activeCount: topK)
         let phase1TG = MTLSize(width: phase1Threads, height: 1, depth: 1)
-        let runPhase2 = kernelName == "moe_phase2" || kernelName == "moe"
-        let runSubset = kernelName == "moe_phase1_subset"
+        let runPhase1 = plan.runsPhase1
+        let runPhase2 = plan.runsPhase2
+        let runSubset = plan.runsSubset
         // active-slot buffer for the subset mode (all 8 experts active).
         var activeSlots = [UInt32](0..<topK)
         let activeSlotsBuf = try makeBuffer(Int(topK) * MemoryLayout<UInt32>.size, 0)
@@ -255,7 +290,7 @@ extension TinyTitanBench {
 
         let totalSeconds = cb.gpuEndTime - cb.gpuStartTime
         let perIteration = totalSeconds / Double(iterations)
-        let bytes: UInt64 = (runPhase1 ? phase1Bytes : 0) + (runPhase2 ? phase2Bytes : 0)
+        let bytes = plan.bytes
         let gbPerSec = Double(bytes) / perIteration / 1_000_000_000
         let theoretical = 100.0
         // Correctness probe: FNV-1a over the acts buffer (the phase-1 output)
