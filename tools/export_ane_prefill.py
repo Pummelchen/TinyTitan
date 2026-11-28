@@ -57,6 +57,8 @@ import tempfile
 import warnings
 
 import numpy as np
+
+from ane_export_args import history_variants
 import coremltools as ct
 from coremltools.converters.mil import Builder as mb
 
@@ -808,9 +810,13 @@ def main() -> int:
 
     if not args.model and not args.source_dir:
         raise SystemExit("one of --model or --source-dir is required")
-    if args.max_history % args.chunk != 0:
-        raise SystemExit(f"--max-history must be a multiple of --chunk ({args.chunk})")
-    histories = list(range(0, args.max_history + 1, args.chunk))
+    # The arithmetic lives in a stdlib-only module so it can be tested without
+    # the Core ML stack, and it refuses a negative history before the model is
+    # opened (AUD-0117).
+    try:
+        histories = history_variants(args.max_history, args.chunk)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
 
     if args.source_dir:
         model_dir = pathlib.Path(args.source_dir)
