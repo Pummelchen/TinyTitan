@@ -68,6 +68,11 @@ public enum PrefillAttentionRef {
                 first = max(0, absQ + 1 - fixture.window)
             }
             let last = min(fixture.kvValid, absQ + 1)
+            // A padded query past the windowed key range has no key to attend
+            // to. `first..<last` with first > last is a runtime trap, so the
+            // row stays zero -- the same rule `AttentionRef` applies when its
+            // score row is empty (AUD-0115).
+            if first >= last { continue }
             for qh in 0..<fixture.qHeads {
                 let kvh = qh / qPerKV
                 var scores: [Float] = []

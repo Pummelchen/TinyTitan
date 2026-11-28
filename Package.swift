@@ -358,6 +358,11 @@ let package = Package(
             path: "tests/TinyTitanBench"
         ),
         .testTarget(
+            name: "TinyTitanValidationTests",
+            dependencies: ["TinyTitanValidationSupport"],
+            path: "tests/TinyTitanValidation"
+        ),
+        .testTarget(
             name: "Ornith35B4BitTests",
             dependencies: [
                 "Ornith35B4Bit", "TinyTitanCore",
