@@ -49,7 +49,7 @@ Reviewed 2026-11-27 at `84006bb8`:
 |---|---|---|---|---|---|---|---|---|---|---|
 | `TinyTitanKernelsC` | A | ~1.9k | R | – | R | R | P | R | N | every `.c` and header read line-by-line 2026-11-27; AUD-0078/0079/0080 fixed, AUD-0085 open; bench numbers exist for L5 but no review |
 | `TinyTitanCore/Metal` (kernels) | A | — | P | – | R | R | – | R | N | every kernel family read line-by-line 2026-11-27 (attention, rmsnorm, gdn, kv-quant, dequant, gguf, logit/sampling, rope, utility, folded/fused, tensorops, qsa, depth_decode, drafthead, short_conv, relative_attention, ple); `logit`/`rope`/`utility`/`fused`/`qsa`/`drafthead` verified clean, the rest carried AUD-0082/0091/0092/0093/0094/0096 |
-| `TinyTitanCore` (Swift) | A | 10.3k | P | P | P | P | – | P | N | `JSONValue`/schema/grammar, manifest reader, format types, `Sampling`, `ChatDialect` read; AUD-0065/0077/0086 fixed, AUD-0084 open. The 2026-11-28 pass read `JSONGrammar`, `JSONGrammar+NumbersAndStrings` and `JSONConstraint` end-to-end (their 17 structured-output tests green), plus `PromptCheckpointPlanner`, `PromptCheckpointStore+Disk` and `AnthropicBuilder`: no defect found in those bodies. Still unread: tokenizer internals, `Generation/*` beyond schema/grammar, the checkpoint store's remaining files, and `AnthropicMapper` |
+| `TinyTitanCore` (Swift) | A | 10.3k | P | P | P | P | – | P | N | `JSONValue`/schema/grammar, manifest reader, format types, `Sampling`, `ChatDialect` read; AUD-0065/0077/0086 fixed, AUD-0084 open. The 2026-11-28 pass read `JSONGrammar`, `JSONGrammar+NumbersAndStrings` and `JSONConstraint` end-to-end (their 17 structured-output tests green), plus `PromptCheckpointPlanner`, `PromptCheckpointStore+Disk` and `AnthropicBuilder`: no defect found in those bodies. Still unread: tokenizer internals, `Generation/*` beyond schema/grammar, and the checkpoint store's remaining files |
 | `TinyTitanFormat` | A | 2.9k | R | P | R | R | – | R | N | manifest/format/index/layout/RANS/GGUF-header readers read; AUD-0074 closed by using its validator in the verifier; `SSDAIBlockEncodingV1`, `SSDAIVariantGeometryV1`, `Inkling2*` arch types skimmed |
 | `Engines/Ornith35B4Bit` | A | 55.6k | P | R | R | P | P | R | N | runtime bodies (`RealForwardRunner+*`, prefetch ring, expert cache/slot accounting, host-streaming prefill) read line-by-line 2026-11-27 and the two siblings diffed against it; AUD-0088/0089/0090 recorded; the plugin surface and `Model+Validation` skimmed |
 | `Engines/DenseGPU` | A | 55.4k | P | P | P | P | P | P | N | runtime diffed against Ornith (10 files differ, none in the reviewed seams) so the runtime findings apply unchanged; `RoPE.swift` read (AUD-0084 fixed) |
@@ -63,7 +63,7 @@ Reviewed 2026-11-27 at `84006bb8`:
 | `TinyTitanLegacyEngine` | A | 1.1k | R | P | R | N | – | P | N | the adapter boundary, read in full; TT-132 removes it |
 | `TinyTitanVariants` | B | 0.6k | R | P | R | N | N | P | N | selection table read; `LegacyRuntimeBoundaryTests` pins the 6.x import set |
 | `TinyTitanCPUEngine` | B | 0.5k | R | P | R | N | – | P | N | facade over the dense CPU backend, read |
-| `TinyTitanServerCore` | A | 10.7k | R | R | R | R | P | R | R | all 41 files read line-by-line 2026-11-27; AUD-0066/0067/0068/0069/0071 fixed, 0070 did not reproduce and is pinned by a test, 0087 open; loopback policy, body/header bounds, response store, coordinator, model router verified clean |
+| `TinyTitanServerCore` | A | 10.7k | R | R | R | R | P | R | R | all 41 files read line-by-line 2026-11-27; AUD-0066/0067/0068/0069/0071 fixed, 0070 did not reproduce and is pinned by a test, 0087 open; loopback policy, body/header bounds, response store, coordinator, model router verified clean. The Anthropic request mapper was re-read on 2026-11-28: AUD-0118 fixed (the thinking budget was checked against the context-clamped output cap, so a 16K server refused Claude Code's ceiling-sized requests) |
 | `TinyTitanRepackCore` / `TinyTitanRepack` | A | 13.1k | R | R | R | R | P | R | R | verification/remote/local/planning/format/workflow read; AUD-0072/0073/0074 fixed, 0075/0076 open; `ArchInfo+*`, `RemoteChunkPolicy`, progress display, RANS writer skimmed |
 | `TinyTitanCLICore` / `TinyTitanCLI` | B | 3.2k | R | P | P | N | – | P | N | args, run, doctor, plugin-check read; calibration and off-disk routes partial |
 | `ContinuityCore` | A | 4.3k | R | R | P | P | – | R | N | journal durability and append/compaction serialisation closed by the earlier audit tasks (0010–0016) and pinned by its suites; store beyond the journal partial |
@@ -103,10 +103,10 @@ Three read-only reviews plus the manager's own pass, at `92abaf92`–`84006bb8`:
   clamps, cadence/keep-warm and head-selection arms, routed-MoE body, and the
   sampling/RoPE/GDN/MoE and attention references are read), the two `tools/`
   files the harness row names as skimmed (with `export_ane_prefill`'s
-  argument/geometry/conversion paths now read), the tokenizer internals and the
-  checkpoint store's other files, and `AnthropicMapper`. The JSON
-  grammar/constraint, the checkpoint planner and `AnthropicBuilder` are read in
-  full.
+  argument/geometry/conversion paths now read), and the tokenizer internals and
+  the checkpoint store's other files. The JSON grammar/constraint, the
+  checkpoint planner, `AnthropicBuilder` and the Anthropic request mapper are
+  read in full.
   The 6.x MoE bodies this bullet used to carry are gone (TT-142 slice (a)), and
   the two install scripts it used to name are now read in full (AUD-0106/0107).
 - The findings this pass produced are the tracker rows AUD-0066…0101; what is
