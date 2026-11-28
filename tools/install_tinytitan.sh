@@ -145,6 +145,14 @@ done
 # so an installed copy keeps its binaries in `$INSTALL_ROOT/bin` and tells the
 # tools where with TINYTITAN_BIN_DIR.
 INSTALL_ROOT="${TINYTITAN_ROOT:-$HOME/.tinytitan}"
+# Everything below replaces or removes `$INSTALL_ROOT/bin` and `.../src`, and
+# writes models under it. A root of `/` or the person's home would turn that into
+# `rm -rf /bin` / `rm -rf ~/bin`; a relative root would resolve under whatever
+# directory the script happened to be started from. The install root is a
+# private directory or the install does not run (AUD-0107).
+if [[ "$INSTALL_ROOT" != /* || "$INSTALL_ROOT" == "/" || "$INSTALL_ROOT" == "$HOME" ]]; then
+  die "refusing TINYTITAN_ROOT=$INSTALL_ROOT: the installer replaces its bin and src directories, so the root must be a private absolute path below your home (default ~/.tinytitan), not /, your home itself, or relative"
+fi
 BIN_PATH="$INSTALL_ROOT/bin"
 SRC_PATH="$INSTALL_ROOT/src"
 MODELS_PATH="$INSTALL_ROOT/models"

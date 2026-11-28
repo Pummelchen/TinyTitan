@@ -183,10 +183,12 @@ class InstallerRun:
         path = self.fixture / name
         path.write_bytes(path.read_bytes() + b"tampered")
 
-    def run(self) -> subprocess.CompletedProcess[str]:
+    def run(
+        self, root: str | None = None, safe_stubs: pathlib.Path | None = None
+    ) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env["HOME"] = str(self.home)
-        env["TINYTITAN_ROOT"] = str(self.install_root)
+        env["TINYTITAN_ROOT"] = str(self.install_root) if root is None else root
         env["TT_FIXTURE"] = str(self.fixture)
         env["TT_REQUESTS"] = str(self.requests)
         # With a farm, the system directories are off PATH entirely: the point of
@@ -195,6 +197,12 @@ class InstallerRun:
             env["PATH"] = f"{self.stub}:{self.farm}"
         else:
             env["PATH"] = f"{self.stub}:{env['PATH']}"
+        if safe_stubs is not None:
+            # A destructive command that the guard should have prevented is
+            # replaced by a logger: the test proves the refusal, it must not be
+            # able to delete anything even when the guard regresses.
+            env["PATH"] = f"{safe_stubs}:{env['PATH']}"
+            env["TT_SAFE_LOG"] = str(self.requests)
         return subprocess.run(
             [
                 "bash",
@@ -215,6 +223,57 @@ class InstallerRun:
     @property
     def urls(self) -> list[str]:
         return self.requests.read_text().split()
+
+
+class InstallRootValidationTests(unittest.TestCase):
+    """A root that would turn the install into `rm -rf /bin` is refused.
+
+    `TINYTITAN_ROOT` is exported by `install_models.sh` and read here; a person
+    who sets it to `/` or to their home would have the installer replace
+    `$root/bin` and `$root/src`. A relative value is refused too, because it
+    resolves under whatever directory the script was started from. The refusal
+    happens before the machine check and before any download (AUD-0107).
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root = pathlib.Path(tempfile.mkdtemp(prefix="tt-install-root-"))
+        cls.env = InstallerRun(cls.root)
+        cls.env.serve_release()
+        cls.safe = cls.root / "safe"
+        cls.safe.mkdir()
+        for name in ("rm", "mkdir", "tar"):
+            stub = cls.safe / name
+            stub.write_text(
+                '#!/bin/sh\nprintf "%s %s\\n" "$0" "$*" >> "${TT_SAFE_LOG:?}"\nexit 0\n'
+            )
+            stub.chmod(0o755)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def assert_refused(self, result: subprocess.CompletedProcess[str]) -> None:
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("refusing TINYTITAN_ROOT=", output)
+        self.assertIn("private", output.lower())
+        self.assertEqual(self.env.urls, [], "the refused run fetched something")
+
+    def test_the_root_may_not_be_the_persons_home(self) -> None:
+        self.assert_refused(self.env.run(root=str(self.env.home)))
+
+    def test_the_root_may_not_be_relative(self) -> None:
+        self.assert_refused(self.env.run(root="tt-relative-root"))
+
+    def test_the_root_may_not_be_the_filesystem_root(self) -> None:
+        # Destructive commands are stubbed for this case only: if the guard ever
+        # regresses the run must still not be able to remove anything.
+        result = self.env.run(root="/", safe_stubs=self.safe)
+        self.assert_refused(result)
+        log = self.env.requests
+        self.assertNotIn("/rm ", log.read_text(), "the refused run invoked rm")
+        self.assertNotIn("/mkdir ", log.read_text(), "the refused run invoked mkdir")
 
 
 class VerifiedInstallTests(unittest.TestCase):
