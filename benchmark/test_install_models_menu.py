@@ -271,7 +271,22 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
         )
         df.chmod(0o755)
 
-    def run_tool(self, *args: str, available_gb: int | None = None):
+    def stub_df_split(self, work_gb: int, models_gb: int) -> None:
+        """`df` that answers per volume, so the two guards can be told apart."""
+        df = self.df_dir / "df"
+        df.write_text(
+            f'#!/bin/sh\necho "Filesystem 1G-blocks Used Available Capacity Mounted on"\n'
+            f'case "$*" in *"{self.work}"*) echo "/dev/work 10000 1 {work_gb} 1% /" ;; '
+            f'*) echo "/dev/models 10000 1 {models_gb} 1% /" ;; esac\n'
+        )
+        df.chmod(0o755)
+
+    def run_tool(
+        self,
+        *args: str,
+        available_gb: int | None = None,
+        split: tuple[int, int] | None = None,
+    ):
         env = dict(
             os.environ,
             TINYTITAN_WORK_DIR=str(self.work),
@@ -279,7 +294,10 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
             TINYTITAN_BIN_DIR=str(self.bin),
             TINYTITAN_PYTHON="/usr/bin/true",
         )
-        if available_gb is not None:
+        if split is not None:
+            self.stub_df_split(*split)
+            env["PATH"] = f"{self.df_dir}:{env['PATH']}"
+        elif available_gb is not None:
             self.stub_df(available_gb)
             env["PATH"] = f"{self.df_dir}:{env['PATH']}"
         return subprocess.run(
@@ -337,6 +355,30 @@ class DiskSpaceAndCleanupTests(unittest.TestCase):
             check=False,
         )
         self.assertIn("FAKE-REPACK", result.stdout + result.stderr)
+
+    def test_an_interrupted_conversion_budgets_for_the_fetch_it_will_redo(self) -> None:
+        # A kill leaves the snapshot directory behind with no index. The
+        # converter branch (rightly) re-runs the fetch, so the guard must budget
+        # the ~90 GB of shards: a bare directory is not a completed snapshot.
+        # With a 3 GB staging volume and plenty of models space, the old
+        # existence test approved 2 GB, then the restart had nowhere to write.
+        snapshot = self.stage("ornith15-affine-4bit", 1)
+        self.assertFalse((snapshot / "model.safetensors.index.json").exists())
+        result = self.run_tool("ornith15", split=(3, 9999))
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("Not starting ornith15", output)
+        self.assertNotIn("FAKE-REPACK", output)
+
+    def test_a_finished_snapshot_is_not_charged_for_another_fetch(self) -> None:
+        # The control: the index is the marker the converter branch itself uses
+        # to skip the fetch, so the same file lets a small staging volume pass.
+        snapshot = self.stage("ornith15-affine-4bit", 1)
+        (snapshot / "model.safetensors.index.json").write_text("{}")
+        result = self.run_tool("ornith15", split=(3, 9999))
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("FAKE-REPACK", output)
 
     def test_staging_goes_once_its_own_install_exists(self) -> None:
         # Every shipped row is one width, so a snapshot has exactly one consumer:

@@ -461,13 +461,20 @@ install_one() {
     # limit: require_gb says nothing then, which is the same rule the runtime's
     # own guard follows.
     if [[ "${TINYTITAN_SKIP_DISK_CHECK:-0}" != "1" ]]; then
-      local size_gb="" snap_exists=0 install_exists=0 probe work_ok=1 models_ok=1
+      local size_gb="" snap_exists=0 install_exists=0 work_ok=1 models_ok=1
       local stream_gb=104 stage_need=""
       size_gb="$(choice_gb "$name")"
       if [[ -n "$size_gb" ]]; then
-        while IFS= read -r probe; do
-          [[ -n "$probe" && -e "$probe" ]] && snap_exists=1
-        done < <(row_staging_paths "$name")
+        # A completed snapshot is the only staging that saves the fetch. An
+        # interrupted conversion leaves its directory behind with no index, and
+        # `install_one` still runs the converter in that case -- so the guard
+        # must ask the same question the converter branch does, or a restart
+        # fetches ~90 GB of shards into a volume the guard just approved for 2
+        # GB (AUD-0106).
+        if [[ -n "$preset_field" && "$source" != repack &&
+              -f "$WORK/${preset_field}-affine-${width}bit/model.safetensors.index.json" ]]; then
+          snap_exists=1
+        fi
         [[ -d "$MODELS/$dir" ]] && install_exists=1
         if [[ "$source" == repack ]]; then
           stage_need=""
