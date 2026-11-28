@@ -71,3 +71,41 @@ import Testing
         #expect(p.bytes == 3 * 512 * 2048)
     }
 }
+
+/// The head benchmark's name table: a typo must not measure the default arm.
+///
+/// `headKernel(named:)` ended in a `default` that picked `head_affine8`, so any
+/// misspelt `head_*` name recorded a real measurement under a mode that does not
+/// exist — the "a control that is really a measurement" shape the flag reader
+/// refuses elsewhere (AUD-0114).
+@Suite struct HeadKernelSelectionTests {
+    @Test func knownNamesSelectTheirKernelAndRows() throws {
+        let affine8 = try TinyTitanBench.headKernel(named: "head_affine8")
+        #expect(affine8.bits == 8 && affine8.rowsPerLaunch == 1)
+        #expect(affine8.kernel == "affine_quant_gemv_simd")
+        let affine4Two = try TinyTitanBench.headKernel(named: "head_affine4_two_rows")
+        #expect(affine4Two.bits == 4 && affine4Two.rowsPerLaunch == 2)
+        #expect(affine4Two.kernel == "affine_quant_gemv2_simd")
+        let int4 = try TinyTitanBench.headKernel(named: "head_int4")
+        #expect(int4.kernel == "dequant_int4_gemv_simd")
+    }
+
+    @Test func anUnknownNameIsRefusedByName() throws {
+        #expect(throws: BenchHarnessError.self) {
+            _ = try TinyTitanBench.headKernel(named: "head_affine8x")
+        }
+        do {
+            _ = try TinyTitanBench.headKernel(named: "head_affine8x")
+            Issue.record("an unknown head name selected a kernel")
+        } catch {
+            #expect(String(describing: error).contains("head_affine8x"))
+            #expect(String(describing: error).contains("unknown head benchmark"))
+        }
+    }
+
+    @Test func theInt4FourRowProbeIsStillRefused() {
+        #expect(throws: BenchHarnessError.self) {
+            _ = try TinyTitanBench.headKernel(named: "head_int4_four_rows")
+        }
+    }
+}

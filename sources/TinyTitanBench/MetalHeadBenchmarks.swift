@@ -36,13 +36,13 @@ extension TinyTitanBench {
     /// rows one launch carries. The int4 four-row probe is refused: it was
     /// measured at the two-row launch's cost for twice the rows and is not a
     /// shipped path, so a bench run must not imply one.
-    private struct HeadKernel {
+    struct HeadKernel {
         let bits: Int
         let kernel: String
         let rowsPerLaunch: Int
     }
 
-    private static func headKernel(named kernelName: String) throws -> HeadKernel {
+    static func headKernel(named kernelName: String) throws -> HeadKernel {
         let fourRows = kernelName.hasSuffix("_four_rows")
         let twoRows = kernelName.hasSuffix("_two_rows")
         let suffix = fourRows ? "4_simd" : (twoRows ? "2_simd" : "_simd")
@@ -68,8 +68,14 @@ extension TinyTitanBench {
             bits = 4
             kernel = "dequant_int4_gemv\(suffix)"
         default:
-            bits = 8
-            kernel = "affine_quant_gemv\(suffix)"
+            // A typo is not a request for the default arm. This fall-through
+            // used to measure `head_affine8` under whatever name the operator
+            // typed, so an arm that does not exist reported a number for one
+            // that does (AUD-0114).
+            throw BenchHarnessError.badConfiguration(
+                "unknown head benchmark \(kernelName); the names are head_affine8, "
+                    + "head_affine4 and head_int4, each optionally _two_rows "
+                    + "(int4 refuses _four_rows)")
         }
         return HeadKernel(
             bits: bits, kernel: kernel, rowsPerLaunch: fourRows ? 4 : (twoRows ? 2 : 1))
