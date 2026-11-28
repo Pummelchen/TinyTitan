@@ -69,6 +69,25 @@ the declared `io_status` buffer and `useResource` on the blobs did not change
 it, so the harness or the kernel's shape binding is wrong; the `moe` GB/s and
 the `gpu.routed_moe_gbps` row it feeds are therefore unverified.
 
+## Fix 1 — the implicit context default (AUD-0121)
+
+The host asks for 262,144 tokens unless `--max-context` is given. Both Inkling
+plans capped that at 128K only when `--ram-budget` was also set, so the default
+run allocated twice the KV window and took the memory the expert cache needs.
+
+The cap now applies whenever the window was not explicit. Paired on the same
+prompt and 128 new tokens:
+
+| install | before | after |
+| --- | ---: | ---: |
+| Inkling 2 Mini NVFP4 (default flags) | 3.06 | **7.94, 7.95** |
+| Inkling 2 Mini UD-Q4_K_XL (default flags) | 10.26 | **10.45, 10.51** |
+
+`tools/golden-baseline.sh --check inkling2-nvfp4` and
+`--check inkling2-gguf-q4` both report `ok — output identical to baseline`.
+An explicit `--max-context 262144` is still honoured; two tests per plugin pin
+the implicit cap and the explicit request.
+
 ## Inkling: the KV precision is the biggest single lever
 
 Both Inklings are read at the shipped default `--kv-bits 8`. The NVFP4 install

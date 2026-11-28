@@ -112,9 +112,11 @@ package struct InklingQ4LoadPlan: Equatable, Sendable {
         }
     }
 
-    /// Default context cap when `--ram-budget` is active and the caller did not
-    /// pass an explicit `--max-context`: 128K with 8-bit KV preserves ~82 expert
-    /// slots at 14 GB (~10.2 tok/s) with zero quality drift vs 16-bit.
+    /// Default context cap when the caller did not pass an explicit
+    /// `--max-context`: 128K with 8-bit KV preserves ~82 expert slots at 14 GB
+    /// (~10.2 tok/s) with zero quality drift vs 16-bit. It applies with or
+    /// without `--ram-budget`; the 262,144 host default doubles the window on a
+    /// 24 GB machine and takes the memory the expert cache needs (AUD-0121).
     package static let defaultBudgetedContext = 131_072
 
     /// The plan for `requested` context tokens. `ramBudget` caps the whole
@@ -134,8 +136,7 @@ package struct InklingQ4LoadPlan: Equatable, Sendable {
             throw Error.budgetTooSmall(budget: ceiling, minimum: minimum)
         }
         let targetContext =
-            (!maxContextExplicit && ramBudget != nil)
-            ? min(requested, defaultBudgetedContext) : requested
+            maxContextExplicit ? requested : min(requested, defaultBudgetedContext)
         // The window takes what is left after the weights and the minimum
         // slots, up to the request and the model's own window.
         let forWindow = ceiling - fixed - minimumSlots * g.bytesPerSlot

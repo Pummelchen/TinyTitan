@@ -75,6 +75,24 @@ struct InklingQ4LoadPlanTests {
         #expect(plan.slots > 60)
     }
 
+    @Test func anImplicitWindowWithoutABudgetStillCapsAtOneTwentyEightK() throws {
+        // The host default request is 262,144, which the operator did not pick.
+        // With no --ram-budget the old rule used it verbatim: twice the KV
+        // window took the memory the expert cache needed, and the NVFP4 install
+        // measured 3.6 tok/s against 8.1 at 128K (AUD-0121).
+        let plan = try InklingQ4LoadPlan.make(
+            geometry: Self.geometry, requested: 262_144, ramBudget: nil,
+            explicitSlots: nil, workingSet: Self.workingSet, maxContextExplicit: false)
+        #expect(plan.context == InklingQ4LoadPlan.defaultBudgetedContext)
+    }
+
+    @Test func anExplicitWindowIsHonoured() throws {
+        let plan = try InklingQ4LoadPlan.make(
+            geometry: Self.geometry, requested: 262_144, ramBudget: nil,
+            explicitSlots: nil, workingSet: Self.workingSet, maxContextExplicit: true)
+        #expect(plan.context == 262_144)
+    }
+
     @Test func perSlotBytesReflectsWindowKVAndFixedState() throws {
         let geometry = InklingQ4LoadPlan.Geometry(
             residentBytes: Self.geometry.residentBytes, bytesPerSlot: Self.geometry.bytesPerSlot,
